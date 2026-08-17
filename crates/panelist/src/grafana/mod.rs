@@ -31,6 +31,7 @@ mod panel;
 mod query;
 mod validate;
 mod variable;
+mod vocabulary;
 mod wire;
 
 pub(crate) use wire::NormalizedDashboard;

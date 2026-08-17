@@ -27,51 +27,14 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::{
-    Color, ColorScheme, FieldConfig, FieldOverride, OverrideMatcher, OverrideProperty, PanelKind,
-    Reducer, ThresholdMode, Thresholds, Unit, panel::PanelOptions,
+    ColorScheme, FieldConfig, FieldOverride, OverrideMatcher, OverrideProperty, PanelKind,
+    Stacking, ThresholdMode, Thresholds, panel::PanelOptions,
 };
 
-use super::panel::{line_interpolation, point_visibility, stacking_value};
+use super::vocabulary::{color, line_interpolation, point_visibility, stacking_mode, unit};
 use super::wire::{
     GrafanaFieldConfig, GrafanaFieldOverride, GrafanaMatcher, GrafanaOverrideProperty,
 };
-
-pub(crate) fn unit(unit: &Unit) -> &str {
-    match unit {
-        Unit::None => "none",
-        Unit::Seconds => "s",
-        Unit::Milliseconds => "ms",
-        Unit::Bytes => "bytes",
-        Unit::BytesPerSecond => "Bps",
-        Unit::Percent => "percent",
-        Unit::RequestsPerSecond => "reqps",
-        Unit::OperationsPerSecond => "ops",
-        Unit::Short => "short",
-        Unit::Custom(value) => value,
-    }
-}
-
-pub(crate) fn color(color: &Color) -> &str {
-    match color {
-        Color::Green => "green",
-        Color::Yellow => "yellow",
-        Color::Red => "red",
-        Color::Blue => "blue",
-        Color::Orange => "orange",
-        Color::Purple => "purple",
-        Color::Custom(value) => value,
-    }
-}
-
-pub(crate) const fn reducer(reducer: Reducer) -> &'static str {
-    match reducer {
-        Reducer::Last => "lastNotNull",
-        Reducer::Min => "min",
-        Reducer::Max => "max",
-        Reducer::Mean => "mean",
-        Reducer::Total => "sum",
-    }
-}
 
 pub(crate) fn normalize_field_config(
     config: &FieldConfig,
@@ -257,6 +220,10 @@ pub(crate) fn insert_number(map: &mut BTreeMap<String, Value>, key: &str, number
     if let Some(value) = number.and_then(serde_json::Number::from_f64) {
         map.insert(key.to_owned(), Value::Number(value));
     }
+}
+
+pub(crate) fn stacking_value(stacking: &Stacking) -> Value {
+    json!({"mode": stacking_mode(stacking.mode), "group": stacking.group})
 }
 
 pub(crate) fn color_scheme_value(scheme: &ColorScheme) -> Value {
