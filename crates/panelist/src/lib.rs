@@ -65,9 +65,9 @@ mod visualization;
 pub use dashboard::{Dashboard, DashboardCursorSync, DashboardItem, DashboardLink, Row, TimeRange};
 pub use datasource::{DataSource, loki, prometheus};
 pub use field::{
-    Color, ColorScheme, FieldConfig, FieldOverride, Legend, LegendCalculation, LegendMode,
-    LegendPlacement, OverrideMatcher, OverrideProperty, ThresholdMode, ThresholdStep, Thresholds,
-    Unit, ValueMapping,
+    Color, ColorScheme, FieldConfig, FieldOverride, Legend, LegendMode, LegendPlacement,
+    OverrideMatcher, OverrideProperty, ThresholdMode, ThresholdStep, Thresholds, Unit,
+    ValueMapping,
 };
 pub use panel::{
     BarGauge, Gauge, GridPos, Heatmap, Panel, PanelBuilder, PanelKind, RawPanel, Stat, Table, Text,
@@ -80,8 +80,8 @@ pub use variable::{
     VariableRefresh, VariableSelection, VariableSort,
 };
 pub use visualization::{
-    BarGaugeDisplayMode, LineInterpolation, Orientation, PointVisibility, ReduceOptions, Stacking,
-    StackingMode, StatColorMode, StatGraphMode, Tooltip, TooltipMode, TooltipSort,
+    BarGaugeDisplayMode, LineInterpolation, Orientation, PointVisibility, ReduceOptions, Reducer,
+    Stacking, StackingMode, StatColorMode, StatGraphMode, Tooltip, TooltipMode, TooltipSort,
 };
 
 #[doc(hidden)]
@@ -94,13 +94,13 @@ pub mod prelude {
     pub use crate::{
         BarGauge, BarGaugeDisplayMode, Color, ColorScheme, ConstantVariable, CustomVariable,
         Dashboard, DashboardCursorSync, DashboardLink, DataSource, DataSourceVariable, FieldConfig,
-        FieldOverride, Gauge, GridPos, Heatmap, Legend, LegendCalculation, LegendMode,
-        LegendPlacement, LineInterpolation, LokiQuery, Orientation, OverrideMatcher,
-        OverrideProperty, Panel, PanelKind, PointVisibility, PrometheusQuery, Query,
-        QueryEditorMode, QueryVariable, RawPanel, RawQuery, ReduceOptions, Row, Stacking,
-        StackingMode, Stat, StatColorMode, StatGraphMode, Table, Text, TextMode, ThresholdMode,
-        Thresholds, TimeRange, Timeseries, Tooltip, TooltipMode, TooltipSort, Unit, ValueMapping,
-        Variable, VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query,
-        prometheus, promql,
+        FieldOverride, Gauge, GridPos, Heatmap, Legend, LegendMode, LegendPlacement,
+        LineInterpolation, LokiQuery, Orientation, OverrideMatcher, OverrideProperty, Panel,
+        PanelKind, PointVisibility, PrometheusQuery, Query, QueryEditorMode, QueryVariable,
+        RawPanel, RawQuery, ReduceOptions, Reducer, Row, Stacking, StackingMode, Stat,
+        StatColorMode, StatGraphMode, Table, Text, TextMode, ThresholdMode, Thresholds, TimeRange,
+        Timeseries, Tooltip, TooltipMode, TooltipSort, Unit, ValueMapping, Variable,
+        VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus,
+        promql,
     };
 }

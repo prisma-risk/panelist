@@ -25,6 +25,8 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use crate::Reducer;
+
 /// A Grafana field unit with common units represented as Rust variants.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -445,40 +447,12 @@ pub enum LegendPlacement {
     Right,
 }
 
-/// A calculation displayed in a table legend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum LegendCalculation {
-    /// Last non-null value.
-    Last,
-    /// Minimum value.
-    Min,
-    /// Maximum value.
-    Max,
-    /// Mean value.
-    Mean,
-    /// Sum.
-    Total,
-}
-
-impl LegendCalculation {
-    pub(crate) fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Last => "lastNotNull",
-            Self::Min => "min",
-            Self::Max => "max",
-            Self::Mean => "mean",
-            Self::Total => "sum",
-        }
-    }
-}
-
 /// Common legend settings.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Legend {
     pub(crate) mode: LegendMode,
     pub(crate) placement: LegendPlacement,
-    pub(crate) calculations: Vec<LegendCalculation>,
+    pub(crate) calculations: Vec<Reducer>,
 }
 
 impl Legend {
@@ -504,10 +478,7 @@ impl Legend {
 
     /// Replaces the displayed calculations.
     #[must_use]
-    pub fn calculations(
-        mut self,
-        calculations: impl IntoIterator<Item = LegendCalculation>,
-    ) -> Self {
+    pub fn calculations(mut self, calculations: impl IntoIterator<Item = Reducer>) -> Self {
         self.calculations = calculations.into_iter().collect();
         self
     }

@@ -132,7 +132,7 @@ fn serializes_units_thresholds_legends_and_overrides() {
             Legend::new()
                 .mode(LegendMode::Table)
                 .placement(LegendPlacement::Right)
-                .calculations([LegendCalculation::Last, LegendCalculation::Max]),
+                .calculations([Reducer::Last, Reducer::Max]),
         )
         .override_field(
             FieldOverride::by_name("p99")
@@ -362,4 +362,19 @@ fn writes_pretty_json_with_a_trailing_newline() {
 
     assert!(json.starts_with("{\n"));
     assert!(json.ends_with("}\n"));
+}
+
+#[test]
+fn reducers_serialize_for_legends_and_reduce_options() {
+    let dashboard = Dashboard::new("Reducers").panel(
+        Stat::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .reduce_options(ReduceOptions::new().calculations([Reducer::Mean, Reducer::Total])),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(
+        value["panels"][0]["options"]["reduceOptions"]["calcs"],
+        json!(["mean", "sum"])
+    );
 }

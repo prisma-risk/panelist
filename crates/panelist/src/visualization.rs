@@ -23,7 +23,36 @@
 
 use serde_json::{Value, json};
 
-use crate::LegendCalculation;
+/// A Grafana reduction applied to a field's values.
+///
+/// Grafana calls this vocabulary `ReducerID`. It is used by table legends,
+/// single-value visualizations, and the time-series-to-table transformation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Reducer {
+    /// Last non-null value.
+    Last,
+    /// Minimum value.
+    Min,
+    /// Maximum value.
+    Max,
+    /// Mean value.
+    Mean,
+    /// Sum.
+    Total,
+}
+
+impl Reducer {
+    pub(crate) const fn as_grafana(self) -> &'static str {
+        match self {
+            Self::Last => "lastNotNull",
+            Self::Min => "min",
+            Self::Max => "max",
+            Self::Mean => "mean",
+            Self::Total => "sum",
+        }
+    }
+}
 
 /// Orientation used by stat, gauge, and bar-gauge visualizations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -279,7 +308,7 @@ impl Tooltip {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReduceOptions {
     values: bool,
-    calculations: Vec<LegendCalculation>,
+    calculations: Vec<Reducer>,
     fields: String,
 }
 
@@ -299,10 +328,7 @@ impl ReduceOptions {
 
     /// Replaces the reduction calculations.
     #[must_use]
-    pub fn calculations(
-        mut self,
-        calculations: impl IntoIterator<Item = LegendCalculation>,
-    ) -> Self {
+    pub fn calculations(mut self, calculations: impl IntoIterator<Item = Reducer>) -> Self {
         self.calculations = calculations.into_iter().collect();
         self
     }
@@ -331,7 +357,7 @@ impl Default for ReduceOptions {
     fn default() -> Self {
         Self {
             values: false,
-            calculations: vec![LegendCalculation::Last],
+            calculations: vec![Reducer::Last],
             fields: String::new(),
         }
     }

@@ -389,7 +389,7 @@ macro_rules! __panelist_legend_items {
         $crate::__panelist_legend_items!($legend; $($rest)*);
     };
     ($legend:ident; values: [$($value:ident),* $(,)?]; $($rest:tt)*) => {
-        $legend = $legend.calculations([$($crate::__panelist_legend_calculation!($value)),*]);
+        $legend = $legend.calculations([$($crate::__panelist_reducer!($value)),*]);
         $crate::__panelist_legend_items!($legend; $($rest)*);
     };
 }
@@ -537,20 +537,20 @@ macro_rules! __panelist_color {
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __panelist_legend_calculation {
+macro_rules! __panelist_reducer {
     (last) => {
-        $crate::LegendCalculation::Last
+        $crate::Reducer::Last
     };
     (min) => {
-        $crate::LegendCalculation::Min
+        $crate::Reducer::Min
     };
     (max) => {
-        $crate::LegendCalculation::Max
+        $crate::Reducer::Max
     };
     (mean) => {
-        $crate::LegendCalculation::Mean
+        $crate::Reducer::Mean
     };
     (total) => {
-        $crate::LegendCalculation::Total
+        $crate::Reducer::Total
     };
 }

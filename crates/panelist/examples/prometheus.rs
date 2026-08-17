@@ -47,11 +47,7 @@ fn main() -> panelist::Result<()> {
         .legend_options(
             Legend::new()
                 .mode(LegendMode::Table)
-                .calculations([
-                    LegendCalculation::Last,
-                    LegendCalculation::Min,
-                    LegendCalculation::Max,
-                ]),
+                .calculations([Reducer::Last, Reducer::Min, Reducer::Max]),
         );
 
     let dashboard = Dashboard::new("Prometheus queries")
