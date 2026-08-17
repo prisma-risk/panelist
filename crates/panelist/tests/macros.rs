@@ -22,6 +22,7 @@
 //
 
 use panelist::prelude::*;
+use serde_json::json;
 
 #[test]
 fn macro_and_builder_produce_the_same_authoring_model() {
@@ -144,6 +145,117 @@ fn transform_dsl_matches_the_builder_model() {
                     .only_ref_id("D"),
             )
             .transform(LabelsToFields::new().keep(["route"])),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
+fn transform_dsl_covers_join_sort_raw_and_top_level_panel_kinds() {
+    let from_macro = dashboard! {
+        title: "Joins and sorting";
+
+        gauge "Gauge" {}
+        text "Text" {
+            content: "hello";
+            mode: markdown;
+        }
+        bar_gauge "Bar gauge" {}
+        heatmap "Heatmap" {}
+
+        table "Multi-source" {
+            query: promql!("sum(a)") { ref_id: "A"; }
+            query: promql!("sum(b)") { ref_id: "B"; }
+
+            transform join_by_field("host", inner);
+            transform join_by_field("cluster", outer) only ref_id("A");
+            transform join_by_field("region", outer_tabular) only ref_id("B");
+            transform join_by_field("zone") only ref_id("A");
+            transform sort_by("host", asc) only ref_id("B");
+            transform: RawTransformation::new("filterFieldsByName")
+                .option("include", json!("host"));
+        }
+    };
+
+    let from_builder = Dashboard::new("Joins and sorting")
+        .panel(Gauge::new("Gauge"))
+        .panel(Text::new("Text").content("hello").mode(TextMode::Markdown))
+        .panel(BarGauge::new("Bar gauge"))
+        .panel(Heatmap::new("Heatmap"))
+        .panel(
+            Table::new("Multi-source")
+                .query(PrometheusQuery::new("sum(a)").ref_id("A"))
+                .query(PrometheusQuery::new("sum(b)").ref_id("B"))
+                .transform(JoinByField::new("host").mode(JoinMode::Inner))
+                .transform(
+                    JoinByField::new("cluster")
+                        .mode(JoinMode::Outer)
+                        .only_ref_id("A"),
+                )
+                .transform(
+                    JoinByField::new("region")
+                        .mode(JoinMode::OuterTabular)
+                        .only_ref_id("B"),
+                )
+                .transform(JoinByField::new("zone").only_ref_id("A"))
+                .transform(SortBy::asc("host").only_ref_id("B"))
+                .transform(
+                    RawTransformation::new("filterFieldsByName").option("include", json!("host")),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
+fn transform_dsl_covers_organize_convert_and_labels_variants() {
+    let from_macro = dashboard! {
+        title: "Conversions";
+
+        table "Conversions" {
+            query: promql!("sum(p)") { ref_id: "P"; }
+            query: promql!("sum(q)") { ref_id: "Q"; }
+
+            transform organize {
+                rename "Value #P" => "Latency";
+            } only ref_id("P");
+            transform time_series_to_table {
+                query "P";
+                time_field "Q": "Time";
+            }
+            transform labels_to_fields {
+                mode: rows;
+                value_label: "value";
+            } only ref_id("Q");
+            transform labels_to_fields;
+        }
+    };
+
+    let from_builder = Dashboard::new("Conversions").panel(
+        Table::new("Conversions")
+            .query(PrometheusQuery::new("sum(p)").ref_id("P"))
+            .query(PrometheusQuery::new("sum(q)").ref_id("Q"))
+            .transform(
+                OrganizeFields::new()
+                    .rename("Value #P", "Latency")
+                    .only_ref_id("P"),
+            )
+            .transform(TimeSeriesToTable::new().query("P").time_field("Q", "Time"))
+            .transform(
+                LabelsToFields::new()
+                    .mode(LabelsToFieldsMode::Rows)
+                    .value_label("value")
+                    .only_ref_id("Q"),
+            )
+            .transform(LabelsToFields::new()),
     );
 
     assert_eq!(from_macro, from_builder);
