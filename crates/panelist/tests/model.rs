@@ -691,3 +691,28 @@ fn empty_transformation_fields_are_rejected() {
     let errors = dashboard.validate().unwrap_err();
     assert_eq!(errors.errors().len(), 2);
 }
+
+#[test]
+fn prometheus_format_serializes_and_is_omitted_by_default() {
+    let dashboard = Dashboard::new("Formats").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").format(PrometheusFormat::Table))
+            .query(PrometheusQuery::new("rate(x[5m])")),
+    );
+
+    let targets = &as_value(&dashboard)["panels"][0]["targets"];
+    assert_eq!(targets[0]["format"], "table");
+    assert!(targets[1].get("format").is_none());
+}
+
+#[test]
+fn heatmap_format_serializes() {
+    let dashboard = Dashboard::new("Heatmap").panel(Heatmap::new("Latency").query(
+        PrometheusQuery::new("sum by (le) (rate(b[5m]))").format(PrometheusFormat::Heatmap),
+    ));
+
+    assert_eq!(
+        as_value(&dashboard)["panels"][0]["targets"][0]["format"],
+        "heatmap"
+    );
+}

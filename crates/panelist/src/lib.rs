@@ -74,7 +74,9 @@ pub use panel::{
     BarGauge, Gauge, GridPos, Heatmap, Panel, PanelBuilder, PanelKind, RawPanel, Stat, Table, Text,
     TextMode, Timeseries,
 };
-pub use query::{LokiQuery, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery};
+pub use query::{
+    LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery,
+};
 pub use transformation::{
     JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, OrganizeFields, RawTransformation,
     SortBy, TimeSeriesToTable, Transformation, TransformationFilter,
@@ -103,11 +105,12 @@ pub mod prelude {
         FieldOverride, Gauge, GridPos, Heatmap, JoinByField, JoinMode, LabelsToFields,
         LabelsToFieldsMode, Legend, LegendMode, LegendPlacement, LineInterpolation, LokiQuery,
         OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel, PanelKind,
-        PointVisibility, PrometheusQuery, Query, QueryEditorMode, QueryVariable, RawPanel,
-        RawQuery, RawTransformation, ReduceOptions, Reducer, Row, SortBy, SortDirection, Stacking,
-        StackingMode, Stat, StatColorMode, StatGraphMode, Table, Text, TextMode, ThresholdMode,
-        Thresholds, TimeRange, TimeSeriesToTable, Timeseries, Tooltip, TooltipMode, TooltipSort,
-        Transformation, TransformationFilter, Unit, ValueMapping, Variable, VariableRefresh,
-        VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus, promql,
+        PointVisibility, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryVariable,
+        RawPanel, RawQuery, RawTransformation, ReduceOptions, Reducer, Row, SortBy, SortDirection,
+        Stacking, StackingMode, Stat, StatColorMode, StatGraphMode, Table, Text, TextMode,
+        ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable, Timeseries, Tooltip, TooltipMode,
+        TooltipSort, Transformation, TransformationFilter, Unit, ValueMapping, Variable,
+        VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus,
+        promql,
     };
 }

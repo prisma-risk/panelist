@@ -164,6 +164,8 @@ pub(crate) struct GrafanaTarget {
     pub(crate) datasource: Option<DataSource>,
     pub(crate) expr: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) format: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) editor_mode: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) legend_format: Option<String>,

@@ -23,7 +23,7 @@
 
 use std::collections::HashSet;
 
-use crate::{DataSource, Query};
+use crate::{DataSource, PrometheusFormat, Query};
 
 use super::layout::reference_id;
 use super::wire::GrafanaTarget;
@@ -72,6 +72,11 @@ pub(crate) fn normalize_targets(
                 ref_id,
                 datasource: options.datasource.as_ref().or(panel_datasource).cloned(),
                 expr: query.expression().to_owned(),
+                format: query.prometheus_format().map(|format| match format {
+                    PrometheusFormat::TimeSeries => "time_series",
+                    PrometheusFormat::Table => "table",
+                    PrometheusFormat::Heatmap => "heatmap",
+                }),
                 editor_mode: options.editor_mode.map(crate::QueryEditorMode::as_grafana),
                 legend_format: options.legend.clone(),
                 instant: options.instant,

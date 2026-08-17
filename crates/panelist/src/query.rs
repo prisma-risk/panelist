@@ -123,11 +123,24 @@ macro_rules! impl_query_builder {
     };
 }
 
+/// The response shape a Prometheus query asks Grafana to produce.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PrometheusFormat {
+    /// One series per label set. Grafana's default.
+    #[default]
+    TimeSeries,
+    /// Tabular result suitable for table panels.
+    Table,
+    /// Bucketed result suitable for heatmap panels.
+    Heatmap,
+}
+
 /// A first-class Prometheus/PromQL query.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrometheusQuery {
     pub(crate) expression: String,
     pub(crate) options: QueryOptions,
+    pub(crate) format: Option<PrometheusFormat>,
 }
 
 impl PrometheusQuery {
@@ -137,7 +150,19 @@ impl PrometheusQuery {
         Self {
             expression: expression.into(),
             options: QueryOptions::default(),
+            format: None,
         }
+    }
+
+    /// Sets the Grafana response format for this query.
+    ///
+    /// Prometheus histogram queries feeding a heatmap panel need
+    /// [`PrometheusFormat::Heatmap`]; table panels joining multiple queries
+    /// usually need [`PrometheusFormat::Table`].
+    #[must_use]
+    pub fn format(mut self, format: PrometheusFormat) -> Self {
+        self.format = Some(format);
+        self
     }
 }
 
@@ -233,6 +258,13 @@ impl Query {
         match self {
             Self::Raw(query) => Some(&query.extra),
             Self::Prometheus(_) | Self::Loki(_) => None,
+        }
+    }
+
+    pub(crate) const fn prometheus_format(&self) -> Option<PrometheusFormat> {
+        match self {
+            Self::Prometheus(query) => query.format,
+            Self::Loki(_) | Self::Raw(_) => None,
         }
     }
 }
