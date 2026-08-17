@@ -1,0 +1,26 @@
+# release-plz configuration: https://release-plz.ieni.dev/docs
+#
+# Dispatch the release-plz workflow with `release-pr` to prepare a release.
+# After merging that PR, dispatch it again with `release` to publish the crate,
+# create a signed tag, and create a GitHub Release.
+
+[workspace]
+# Keep dependency updates in dedicated pull requests.
+dependencies_update = false
+
+# Publish a GitHub Release and tag for every crates.io release.
+git_release_enable = true
+git_tag_enable = true
+
+# Maintain the crate changelog from conventional commits.
+changelog_update = true
+
+# Verify the packaged crate before uploading it.
+publish_no_verify = false
+
+# Enable this after cargo-semver-checks is part of the release environment.
+semver_check = false
+
+# Release only for user-visible changes. Other commits remain eligible for the
+# changelog when a release-worthy commit is present.
+release_commits = "^(feat|fix|perf|refactor)"

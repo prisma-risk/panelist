@@ -71,6 +71,19 @@ the committed golden dashboard, then review the JSON diff before committing.
 - Explain wire-format compatibility and migration impact in changes to the
   Grafana serializer.
 
+## Releases
+
+Releases run through [release-plz](https://release-plz.dev/):
+
+1. Land release-worthy changes on `main` with a `feat:`, `fix:`, `perf:`, or `refactor:` Conventional Commit prefix.
+2. Dispatch the `release-plz` workflow to open or update the release PR. It owns the workspace version and `crates/panelist/CHANGELOG.md` changes. Select the default `release-pr` command.
+3. Review and merge the release PR.
+4. Dispatch the workflow again with the `release` command. This creates a signed `vX.Y.Z` tag, publishes Panelist to crates.io, and creates the matching GitHub Release.
+
+Pushes to `main` never cut or publish a release; both release phases require a manual workflow dispatch.
+
+Before changing publish metadata, run `make release-dry-run` to validate the crate archive exactly as crates.io will receive it. The publish job is the only job that receives `CARGO_REGISTRY_TOKEN`.
+
 ## Developer Certificate of Origin
 
 Panelist uses the [Developer Certificate of Origin 1.1](https://developercertificate.org/).

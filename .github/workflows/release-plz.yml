@@ -1,0 +1,105 @@
+name: release-plz
+
+# Both phases are manual. Use `release-pr` to prepare the version and changelog,
+# then use `release` after that PR is merged to publish the prepared version.
+# Pushes to main never cut or publish a release.
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Release phase to run
+        required: true
+        default: release-pr
+        type: choice
+        options:
+          - release-pr
+          - release
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main' && inputs.command == 'release'
+    name: release-plz release
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      contents: write
+      id-token: write
+    concurrency:
+      group: release-plz-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        with:
+          client-id: ${{ secrets.PUBLIC_RELEASE_APP_ID }}
+          private-key: ${{ secrets.PUBLIC_RELEASE_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.96.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6a # v2.9.2
+      - name: Install gitsign
+        env:
+          GITSIGN_VERSION: "0.16.0"
+          GITSIGN_SHA256: "176b77ae1cf57ac73343c378e2f1338346930324bfb20408b600d97d21e45aa1"
+        run: |
+          set -euo pipefail
+          asset="gitsign_${GITSIGN_VERSION}_linux_amd64"
+          curl -sSLo /tmp/gitsign \
+            "https://github.com/sigstore/gitsign/releases/download/v${GITSIGN_VERSION}/${asset}"
+          echo "${GITSIGN_SHA256}  /tmp/gitsign" | sha256sum -c -
+          sudo install -m 0755 /tmp/gitsign /usr/local/bin/gitsign
+          rm -f /tmp/gitsign
+          gitsign --version
+      - name: Configure signed release tags
+        run: |
+          set -euo pipefail
+          git config --global gpg.x509.program gitsign
+          git config --global gpg.format x509
+          git config --global tag.gpgSign true
+          git config --global gitsign.rekorMode offline
+      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  release-pr:
+    if: github.ref == 'refs/heads/main' && inputs.command == 'release-pr'
+    name: release-plz PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        with:
+          client-id: ${{ secrets.PUBLIC_RELEASE_APP_ID }}
+          private-key: ${{ secrets.PUBLIC_RELEASE_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.96.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6a # v2.9.2
+      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

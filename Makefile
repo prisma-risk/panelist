@@ -1,7 +1,7 @@
 CARGO ?= cargo
 CARGO_DENY_CHECK_FLAGS ?=
 
-.PHONY: all ci check fmt fmt-check lint fix build test doc headers package deny clean help
+.PHONY: all ci check fmt fmt-check lint fix build test doc headers package release-dry-run deny clean help
 
 all: ci
 
@@ -39,6 +39,9 @@ headers:
 package:
 	$(CARGO) package -p panelist --allow-dirty --locked
 
+release-dry-run:
+	$(CARGO) publish --dry-run -p panelist --locked
+
 deny:
 	$(CARGO) deny check $(CARGO_DENY_CHECK_FLAGS)
 
@@ -59,5 +62,6 @@ help:
 	@echo "  make doc          Build rustdoc with warnings denied"
 	@echo "  make headers      Verify Rust source headers"
 	@echo "  make package      Verify the distributable crate tarball"
+	@echo "  make release-dry-run  Validate the crates.io upload without publishing"
 	@echo "  make deny         Check licenses and advisories"
 	@echo "  make clean        Remove Cargo build output"
