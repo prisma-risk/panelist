@@ -393,6 +393,19 @@ fn raw_options_still_override_typed_panel_options() {
 }
 
 #[test]
+fn raw_option_wins_even_when_set_before_the_typed_setter() {
+    let dashboard = Dashboard::new("Precedence before").panel(
+        Stat::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .option("colorMode", json!("none"))
+            .color_mode(StatColorMode::Background),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(value["panels"][0]["options"]["colorMode"], "none");
+}
+
+#[test]
 fn typed_panel_options_survive_a_later_unrelated_option() {
     let dashboard = Dashboard::new("Merge").panel(
         Stat::new("Value")
@@ -404,4 +417,54 @@ fn typed_panel_options_survive_a_later_unrelated_option() {
     let value = as_value(&dashboard);
     assert_eq!(value["panels"][0]["options"]["colorMode"], "background");
     assert_eq!(value["panels"][0]["options"]["textMode"], "value");
+    assert_eq!(value["panels"][0]["options"]["graphMode"], "area");
+}
+
+#[test]
+fn field_config_no_longer_wipes_a_typed_setter() {
+    let dashboard = Dashboard::new("Field config order").panel(
+        Timeseries::new("Latency")
+            .query(PrometheusQuery::new("up"))
+            .fill_opacity(50.0)
+            .field_config(FieldConfig::new().unit(Unit::Seconds)),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(
+        value["panels"][0]["fieldConfig"]["defaults"]["custom"]["fillOpacity"],
+        50.0
+    );
+}
+
+#[test]
+fn field_config_custom_still_beats_a_typed_setter_regardless_of_order() {
+    let dashboard = Dashboard::new("Field config custom wins").panel(
+        Timeseries::new("Latency")
+            .query(PrometheusQuery::new("up"))
+            .field_config(FieldConfig::new().custom("lineWidth", json!(9)))
+            .line_width(2.0),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(
+        value["panels"][0]["fieldConfig"]["defaults"]["custom"]["lineWidth"],
+        9
+    );
+}
+
+#[test]
+fn gauge_lowers_orientation_and_reduce_options() {
+    let dashboard = Dashboard::new("Gauge options").panel(
+        Gauge::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .orientation(Orientation::Vertical)
+            .reduce_options(ReduceOptions::new().calculations([Reducer::Max])),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(value["panels"][0]["options"]["orientation"], "vertical");
+    assert_eq!(
+        value["panels"][0]["options"]["reduceOptions"]["calcs"],
+        json!(["max"])
+    );
 }

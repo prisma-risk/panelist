@@ -281,7 +281,7 @@ pub(crate) fn default_panel_options(panel: &Panel) -> BTreeMap<String, Value> {
 pub(crate) fn typed_panel_options(options: &PanelOptions) -> BTreeMap<String, Value> {
     let mut output = BTreeMap::new();
     match options {
-        PanelOptions::None | PanelOptions::Table(_) | PanelOptions::Heatmap(_) => {}
+        PanelOptions::None => {}
         PanelOptions::Stat(stat) => {
             if let Some(mode) = stat.color_mode {
                 output.insert("colorMode".to_owned(), json!(stat_color_mode(mode)));
@@ -326,38 +326,6 @@ pub(crate) fn typed_panel_options(options: &PanelOptions) -> BTreeMap<String, Va
                 output.insert("tooltip".to_owned(), tooltip_value(tooltip));
             }
         }
-    }
-    output
-}
-
-pub(crate) fn typed_field_custom(options: &PanelOptions) -> BTreeMap<String, Value> {
-    let mut output = BTreeMap::new();
-    let PanelOptions::Timeseries(timeseries) = options else {
-        return output;
-    };
-    if let Some(opacity) = timeseries.fill_opacity {
-        output.insert("fillOpacity".to_owned(), json!(opacity));
-    }
-    if let Some(width) = timeseries.line_width {
-        output.insert("lineWidth".to_owned(), json!(width));
-    }
-    if let Some(size) = timeseries.point_size {
-        output.insert("pointSize".to_owned(), json!(size));
-    }
-    if let Some(interpolation) = timeseries.line_interpolation {
-        output.insert(
-            "lineInterpolation".to_owned(),
-            json!(line_interpolation(interpolation)),
-        );
-    }
-    if let Some(visibility) = timeseries.show_points {
-        output.insert("showPoints".to_owned(), json!(point_visibility(visibility)));
-    }
-    if let Some(span_nulls) = timeseries.span_nulls {
-        output.insert("spanNulls".to_owned(), json!(span_nulls));
-    }
-    if let Some(stacking) = &timeseries.stacking {
-        output.insert("stacking".to_owned(), stacking_value(stacking));
     }
     output
 }

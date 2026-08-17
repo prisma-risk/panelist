@@ -31,6 +31,7 @@ use crate::{
     Reducer, ThresholdMode, Thresholds, Unit, panel::PanelOptions,
 };
 
+use super::panel::{line_interpolation, point_visibility, stacking_value};
 use super::wire::{
     GrafanaFieldConfig, GrafanaFieldOverride, GrafanaMatcher, GrafanaOverrideProperty,
 };
@@ -115,7 +116,7 @@ pub(crate) fn normalize_field_config(
     }
 
     let mut custom = default_field_custom(kind);
-    custom.extend(crate::grafana::panel::typed_field_custom(kind_options));
+    custom.extend(typed_field_custom(kind_options));
     custom.extend(config.custom.clone());
     if !custom.is_empty() {
         defaults.insert("custom".to_owned(), json!(custom));
@@ -150,6 +151,38 @@ pub(crate) fn default_field_custom(kind: &PanelKind) -> BTreeMap<String, Value> 
         | PanelKind::Raw(_) => {}
     }
     custom
+}
+
+pub(crate) fn typed_field_custom(options: &PanelOptions) -> BTreeMap<String, Value> {
+    let mut output = BTreeMap::new();
+    let PanelOptions::Timeseries(timeseries) = options else {
+        return output;
+    };
+    if let Some(opacity) = timeseries.fill_opacity {
+        output.insert("fillOpacity".to_owned(), json!(opacity));
+    }
+    if let Some(width) = timeseries.line_width {
+        output.insert("lineWidth".to_owned(), json!(width));
+    }
+    if let Some(size) = timeseries.point_size {
+        output.insert("pointSize".to_owned(), json!(size));
+    }
+    if let Some(interpolation) = timeseries.line_interpolation {
+        output.insert(
+            "lineInterpolation".to_owned(),
+            json!(line_interpolation(interpolation)),
+        );
+    }
+    if let Some(visibility) = timeseries.show_points {
+        output.insert("showPoints".to_owned(), json!(point_visibility(visibility)));
+    }
+    if let Some(span_nulls) = timeseries.span_nulls {
+        output.insert("spanNulls".to_owned(), json!(span_nulls));
+    }
+    if let Some(stacking) = &timeseries.stacking {
+        output.insert("stacking".to_owned(), stacking_value(stacking));
+    }
+    output
 }
 
 pub(crate) fn normalize_override(field_override: &FieldOverride) -> GrafanaFieldOverride {

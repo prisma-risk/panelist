@@ -29,8 +29,6 @@ use crate::{
     BarGaugeDisplayMode, ColorScheme, DashboardLink, DataSource, FieldConfig, FieldOverride,
     Legend, LineInterpolation, Orientation, PointVisibility, Query, ReduceOptions, Stacking,
     StatColorMode, StatGraphMode, Thresholds, Tooltip, Unit, ValueMapping,
-    heatmap::HeatmapOptions,
-    table::TableOptions,
     visualization::{BarGaugeOptions, GaugeOptions, StatOptions, TimeseriesOptions},
 };
 
@@ -154,13 +152,9 @@ impl Panel {
 
 /// Typed, visualization-specific panel options.
 ///
-/// `Table` and `Heatmap` are not constructed anywhere yet: Tasks 9 and 10 add
-/// the `TableKind`/`HeatmapKind` builder setters that reach them via the
-/// `table()`/`heatmap()` accessors below. Remove this `allow` once both do.
-#[allow(
-    dead_code,
-    reason = "Table and Heatmap are constructed starting in tasks 9 and 10"
-)]
+/// `Table` and `Heatmap` variants are added by Tasks 9 and 10, the tasks that
+/// first construct them, so that a lowering the compiler could otherwise
+/// silently skip becomes a compile error instead.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) enum PanelOptions {
     /// A visualization with no typed option surface.
@@ -170,16 +164,10 @@ pub(crate) enum PanelOptions {
     Gauge(GaugeOptions),
     Timeseries(TimeseriesOptions),
     BarGauge(BarGaugeOptions),
-    Table(TableOptions),
-    Heatmap(HeatmapOptions),
 }
 
 macro_rules! kind_options {
     ($($method:ident => $variant:ident($type:ty)),+ $(,)?) => {
-        // `table()`/`heatmap()` have no callers until Tasks 9 and 10 add the
-        // builder setters that reach them; see the matching note on
-        // `PanelOptions`. Remove this `allow` once both do.
-        #[allow(dead_code, reason = "table()/heatmap() gain callers in tasks 9 and 10")]
         impl PanelOptions {
             $(
                 pub(crate) fn $method(&mut self) -> &mut $type {
@@ -203,8 +191,6 @@ kind_options!(
     gauge => Gauge(GaugeOptions),
     timeseries => Timeseries(TimeseriesOptions),
     bar_gauge => BarGauge(BarGaugeOptions),
-    table => Table(TableOptions),
-    heatmap => Heatmap(HeatmapOptions),
 );
 
 /// Marker trait implemented by typed panel builders.
