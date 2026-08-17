@@ -800,3 +800,31 @@ fn table_sorting_serializes_as_a_panel_option() {
         ])
     );
 }
+
+#[test]
+fn heatmap_options_merge_over_grafana_defaults() {
+    let dashboard = Dashboard::new("Heatmap").panel(
+        Heatmap::new("Latency")
+            .query(PrometheusQuery::new("sum by (le) (rate(b[5m]))"))
+            .color_scheme("Blues")
+            .color_steps(32)
+            .cell_gap(2)
+            .show_legend(false)
+            .y_axis_unit(Unit::Seconds)
+            .y_axis_placement(AxisPlacement::Right)
+            .calculate(false),
+    );
+
+    let options = &as_value(&dashboard)["panels"][0]["options"];
+    assert_eq!(
+        options["color"],
+        json!({"mode": "scheme", "scheme": "Blues", "steps": 32})
+    );
+    assert_eq!(options["cellGap"], 2);
+    assert_eq!(options["legend"], json!({"show": false}));
+    assert_eq!(
+        options["yAxis"],
+        json!({"axisPlacement": "right", "unit": "s"})
+    );
+    assert_eq!(options["calculate"], false);
+}

@@ -26,8 +26,8 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use crate::{
-    DataSource, GridPos, Legend, LegendMode, LegendPlacement, Panel, PanelKind, ReduceOptions, Row,
-    TextMode, Tooltip, panel::PanelOptions,
+    AxisPlacement, DataSource, GridPos, HeatmapColorMode, HeatmapColorScheme, Legend, LegendMode,
+    LegendPlacement, Panel, PanelKind, ReduceOptions, Row, TextMode, Tooltip, panel::PanelOptions,
 };
 
 use super::field::normalize_field_config;
@@ -276,8 +276,82 @@ pub(crate) fn typed_panel_options(options: &PanelOptions) -> BTreeMap<String, Va
                 );
             }
         }
+        PanelOptions::Heatmap(heatmap) => {
+            // `color`, `legend`, and `yAxis` are complete objects in
+            // `default_panel_options`. `BTreeMap::extend` replaces whole
+            // values rather than merging keys, so each arm below must
+            // rebuild the entire object from the same defaults tier 1 uses,
+            // filling in only the fields the caller actually set.
+            if heatmap.color_scheme.is_some()
+                || heatmap.color_steps.is_some()
+                || heatmap.color_mode.is_some()
+            {
+                let mode = heatmap.color_mode.unwrap_or(HeatmapColorMode::Scheme);
+                output.insert(
+                    "color".to_owned(),
+                    json!({
+                        "mode": match mode {
+                            HeatmapColorMode::Scheme => "scheme",
+                            HeatmapColorMode::Opacity => "opacity",
+                        },
+                        "scheme": heatmap
+                            .color_scheme
+                            .as_ref()
+                            .map_or("Oranges", heatmap_color_scheme),
+                        "steps": heatmap.color_steps.unwrap_or(64),
+                    }),
+                );
+            }
+            if let Some(gap) = heatmap.cell_gap {
+                output.insert("cellGap".to_owned(), json!(gap));
+            }
+            if let Some(show) = heatmap.legend {
+                output.insert("legend".to_owned(), json!({"show": show}));
+            }
+            if heatmap.y_axis_unit.is_some() || heatmap.y_axis_placement.is_some() {
+                let mut axis = serde_json::Map::new();
+                axis.insert(
+                    "axisPlacement".to_owned(),
+                    json!(axis_placement(
+                        heatmap.y_axis_placement.unwrap_or(AxisPlacement::Left)
+                    )),
+                );
+                if let Some(unit) = &heatmap.y_axis_unit {
+                    axis.insert("unit".to_owned(), json!(super::vocabulary::unit(unit)));
+                }
+                output.insert("yAxis".to_owned(), Value::Object(axis));
+            }
+            if let Some(calculate) = heatmap.calculate {
+                output.insert("calculate".to_owned(), json!(calculate));
+            }
+        }
     }
     output
+}
+
+fn heatmap_color_scheme(scheme: &HeatmapColorScheme) -> &str {
+    match scheme {
+        HeatmapColorScheme::Oranges => "Oranges",
+        HeatmapColorScheme::Blues => "Blues",
+        HeatmapColorScheme::Greens => "Greens",
+        HeatmapColorScheme::Reds => "Reds",
+        HeatmapColorScheme::Purples => "Purples",
+        HeatmapColorScheme::Turbo => "Turbo",
+        HeatmapColorScheme::Viridis => "Viridis",
+        HeatmapColorScheme::Spectral => "Spectral",
+        HeatmapColorScheme::Custom(value) => value,
+    }
+}
+
+const fn axis_placement(placement: AxisPlacement) -> &'static str {
+    match placement {
+        AxisPlacement::Auto => "auto",
+        AxisPlacement::Bottom => "bottom",
+        AxisPlacement::Hidden => "hidden",
+        AxisPlacement::Left => "left",
+        AxisPlacement::Right => "right",
+        AxisPlacement::Top => "top",
+    }
 }
 
 pub(crate) fn legend_value(legend: Option<&Legend>) -> Value {

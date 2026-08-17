@@ -26,10 +26,11 @@ use std::{collections::BTreeMap, marker::PhantomData};
 use serde_json::Value;
 
 use crate::{
-    BarGaugeDisplayMode, ColorScheme, DashboardLink, DataSource, FieldConfig, FieldOverride,
-    Legend, LineInterpolation, Orientation, PointVisibility, Query, ReduceOptions, SortDirection,
-    Stacking, StatColorMode, StatGraphMode, TableCell, TableSort, Thresholds, Tooltip,
-    Transformation, Unit, ValueMapping,
+    AxisPlacement, BarGaugeDisplayMode, ColorScheme, DashboardLink, DataSource, FieldConfig,
+    FieldOverride, HeatmapColorMode, HeatmapColorScheme, Legend, LineInterpolation, Orientation,
+    PointVisibility, Query, ReduceOptions, SortDirection, Stacking, StatColorMode, StatGraphMode,
+    TableCell, TableSort, Thresholds, Tooltip, Transformation, Unit, ValueMapping,
+    heatmap::HeatmapOptions,
     table::TableOptions,
     visualization::{BarGaugeOptions, GaugeOptions, StatOptions, TimeseriesOptions},
 };
@@ -167,6 +168,7 @@ pub(crate) enum PanelOptions {
     Timeseries(TimeseriesOptions),
     BarGauge(BarGaugeOptions),
     Table(TableOptions),
+    Heatmap(HeatmapOptions),
 }
 
 macro_rules! kind_options {
@@ -195,6 +197,7 @@ kind_options!(
     timeseries => Timeseries(TimeseriesOptions),
     bar_gauge => BarGauge(BarGaugeOptions),
     table => Table(TableOptions),
+    heatmap => Heatmap(HeatmapOptions),
 );
 
 /// Marker trait implemented by typed panel builders.
@@ -693,6 +696,67 @@ impl PanelBuilder<TableKind> {
     #[must_use]
     pub fn cell(mut self, cell: impl Into<TableCell>) -> Self {
         self.panel.field_config.cell = Some(cell.into());
+        self
+    }
+}
+
+impl PanelBuilder<HeatmapKind> {
+    /// Sets the color palette, for example `"Oranges"`.
+    #[must_use]
+    pub fn color_scheme(mut self, scheme: impl Into<HeatmapColorScheme>) -> Self {
+        self.panel.kind_options.heatmap().color_scheme = Some(scheme.into());
+        self
+    }
+
+    /// Sets the number of discrete color steps.
+    #[must_use]
+    pub fn color_steps(mut self, steps: u32) -> Self {
+        self.panel.kind_options.heatmap().color_steps = Some(steps);
+        self
+    }
+
+    /// Selects palette or opacity coloring.
+    #[must_use]
+    pub fn color_mode(mut self, mode: HeatmapColorMode) -> Self {
+        self.panel.kind_options.heatmap().color_mode = Some(mode);
+        self
+    }
+
+    /// Sets the gap between cells in pixels.
+    #[must_use]
+    pub fn cell_gap(mut self, gap: u8) -> Self {
+        self.panel.kind_options.heatmap().cell_gap = Some(gap);
+        self
+    }
+
+    /// Shows or hides the color-scale legend.
+    ///
+    /// Named `show_legend` rather than `legend` because `PanelBuilder`
+    /// already exposes `legend` for a query's legend format.
+    #[must_use]
+    pub fn show_legend(mut self, show: bool) -> Self {
+        self.panel.kind_options.heatmap().legend = Some(show);
+        self
+    }
+
+    /// Sets the Y-axis unit.
+    #[must_use]
+    pub fn y_axis_unit(mut self, unit: Unit) -> Self {
+        self.panel.kind_options.heatmap().y_axis_unit = Some(unit);
+        self
+    }
+
+    /// Sets the Y-axis placement.
+    #[must_use]
+    pub fn y_axis_placement(mut self, placement: AxisPlacement) -> Self {
+        self.panel.kind_options.heatmap().y_axis_placement = Some(placement);
+        self
+    }
+
+    /// Chooses between bucketing raw data and consuming pre-bucketed data.
+    #[must_use]
+    pub fn calculate(mut self, calculate: bool) -> Self {
+        self.panel.kind_options.heatmap().calculate = Some(calculate);
         self
     }
 }

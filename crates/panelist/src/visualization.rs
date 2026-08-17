@@ -315,3 +315,22 @@ pub(crate) struct BarGaugeOptions {
     pub(crate) orientation: Option<Orientation>,
     pub(crate) reduce: Option<ReduceOptions>,
 }
+
+/// Where Grafana draws an axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum AxisPlacement {
+    /// Let Grafana choose.
+    #[default]
+    Auto,
+    /// Below the visualization.
+    Bottom,
+    /// Do not draw the axis.
+    Hidden,
+    /// Left of the visualization.
+    Left,
+    /// Right of the visualization.
+    Right,
+    /// Above the visualization.
+    Top,
+}
