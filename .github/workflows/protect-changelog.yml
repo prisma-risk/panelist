@@ -1,0 +1,93 @@
+name: Protect release changelogs
+
+# Evaluate the trusted workflow from the base branch without checking out or
+# executing contributor code. The guard protects its own workflow path too.
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changelog-owner:
+    name: release-plz owns CHANGELOG.md
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject contributor changelog changes
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pullRequest = context.payload.pull_request;
+            if (!pullRequest) {
+              core.setFailed('This guard must run from a pull_request event.');
+              return;
+            }
+
+            const author = pullRequest.user?.login ?? '<unknown>';
+            const pullRequestQuery = {
+              ...context.repo,
+              pull_number: pullRequest.number,
+            };
+            const [{ data: currentPullRequest }, files] = await Promise.all([
+              github.rest.pulls.get(pullRequestQuery),
+              github.paginate(github.rest.pulls.listFiles, {
+                ...pullRequestQuery,
+                per_page: 100,
+              }),
+            ]);
+
+            const reportedCount = currentPullRequest.changed_files;
+            if (!Number.isInteger(reportedCount) || files.length < reportedCount) {
+              core.setFailed(
+                `GitHub reported ${reportedCount ?? 'an unknown number of'} changed files ` +
+                  `but returned only ${files.length}; refusing to approve an incomplete ` +
+                  `changelog check.`,
+              );
+              return;
+            }
+
+            const guardPath = '.github/workflows/protect-changelog.yml';
+            const isChangelog = (path) =>
+              typeof path === 'string' && /(^|\/)CHANGELOG\.md$/.test(path);
+            const changedPaths = files.flatMap((file) => {
+              const paths = [file.filename, file.previous_filename].filter(
+                (path) => isChangelog(path) || path === guardPath,
+              );
+              return [...new Set(paths)];
+            });
+            const protectedPaths = [...new Set(changedPaths)].sort();
+
+            if (protectedPaths.includes(guardPath)) {
+              core.setFailed(
+                `${guardPath} is protected by this required check and cannot be changed ` +
+                  `by a pull request.`,
+              );
+              return;
+            }
+
+            const changelogs = protectedPaths.filter(isChangelog);
+
+            if (changelogs.length === 0) {
+              core.info(`No CHANGELOG.md files changed by ${author}.`);
+              return;
+            }
+
+            const releaseAuthor = {
+              id: 286791072,
+              login: 'prismarisk-public-release[bot]',
+            };
+            const trustedReleaseAuthor =
+              pullRequest.user?.id === releaseAuthor.id &&
+              pullRequest.user?.login === releaseAuthor.login &&
+              pullRequest.user?.type === 'Bot';
+            if (trustedReleaseAuthor) {
+              core.info(`Trusted release-plz PR author: ${author}`);
+              return;
+            }
+
+            core.setFailed(
+              `Only release-plz PRs authored by ${releaseAuthor.login} may update ` +
+                `CHANGELOG.md files. ${author} changed: ` +
+                `${changelogs.join(', ')}`,
+            );
