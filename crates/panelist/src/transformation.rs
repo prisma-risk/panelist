@@ -27,34 +27,6 @@ use serde_json::Value;
 
 use crate::{Reducer, SortDirection};
 
-/// Properties shared by every transformation.
-///
-/// Nothing in Panelist sets `filter` or `disabled` yet — the builder methods
-/// that populate them are added by a later task — so every transformation
-/// currently carries an empty envelope.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct TransformationEnvelope {
-    pub(crate) filter: Option<TransformationFilter>,
-    pub(crate) disabled: bool,
-}
-
-/// Restricts a transformation to selected query results.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-#[allow(
-    dead_code,
-    reason = "constructed by the only_ref_id/only_frame_name/only_frame_index builder \
-              methods Task 6 adds; remove this allow once those methods land"
-)]
-pub enum TransformationFilter {
-    /// Match one query reference ID.
-    RefId(String),
-    /// Match a data frame by name.
-    FrameName(String),
-    /// Match a data frame by position.
-    FrameIndex(usize),
-}
-
 /// How Grafana joins multiple query results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JoinMode {
@@ -72,7 +44,6 @@ pub enum JoinMode {
 pub struct JoinByField {
     pub(crate) field: String,
     pub(crate) mode: JoinMode,
-    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl JoinByField {
@@ -82,7 +53,6 @@ impl JoinByField {
         Self {
             field: field.into(),
             mode: JoinMode::Outer,
-            envelope: TransformationEnvelope::default(),
         }
     }
 
@@ -112,7 +82,6 @@ pub struct OrganizeFields {
     pub(crate) renames: BTreeMap<String, String>,
     pub(crate) hidden: BTreeSet<String>,
     pub(crate) order: Vec<String>,
-    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl OrganizeFields {
@@ -147,7 +116,7 @@ impl OrganizeFields {
 
 /// One field in a sort transformation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SortByField {
+pub(crate) struct SortByField {
     pub(crate) field: String,
     pub(crate) descending: bool,
 }
@@ -156,7 +125,6 @@ pub struct SortByField {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SortBy {
     pub(crate) fields: Vec<SortByField>,
-    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl SortBy {
@@ -168,7 +136,6 @@ impl SortBy {
                 field: field.into(),
                 descending: direction.is_descending(),
             }],
-            envelope: TransformationEnvelope::default(),
         }
     }
 
@@ -197,7 +164,7 @@ impl SortBy {
 
 /// Per-query configuration for the time-series-to-table transformation.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct TimeSeriesToTableQuery {
+pub(crate) struct TimeSeriesToTableQuery {
     pub(crate) stat: Option<Reducer>,
     pub(crate) time_field: Option<String>,
 }
@@ -206,7 +173,6 @@ pub struct TimeSeriesToTableQuery {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TimeSeriesToTable {
     pub(crate) queries: BTreeMap<String, TimeSeriesToTableQuery>,
-    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl TimeSeriesToTable {
@@ -254,7 +220,6 @@ pub struct LabelsToFields {
     pub(crate) mode: LabelsToFieldsMode,
     pub(crate) keep: Vec<String>,
     pub(crate) value_label: Option<String>,
-    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl LabelsToFields {
@@ -291,7 +256,6 @@ impl LabelsToFields {
 pub struct RawTransformation {
     pub(crate) id: String,
     pub(crate) options: BTreeMap<String, Value>,
-    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl RawTransformation {
@@ -301,7 +265,6 @@ impl RawTransformation {
         Self {
             id: id.into(),
             options: BTreeMap::new(),
-            envelope: TransformationEnvelope::default(),
         }
     }
 
