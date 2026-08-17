@@ -79,21 +79,6 @@ pub enum PanelKind {
     Raw(String),
 }
 
-impl PanelKind {
-    pub(crate) fn plugin_id(&self) -> &str {
-        match self {
-            Self::Timeseries => "timeseries",
-            Self::Stat => "stat",
-            Self::Gauge => "gauge",
-            Self::Table => "table",
-            Self::Text => "text",
-            Self::BarGauge => "bargauge",
-            Self::Heatmap => "heatmap",
-            Self::Raw(plugin_id) => plugin_id,
-        }
-    }
-}
-
 /// Markdown, HTML, or code mode for a text panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TextMode {
@@ -104,16 +89,6 @@ pub enum TextMode {
     Html,
     /// Render plain code/text.
     Code,
-}
-
-impl TextMode {
-    pub(crate) fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Markdown => "markdown",
-            Self::Html => "html",
-            Self::Code => "code",
-        }
-    }
 }
 
 /// The semantic panel model produced by typed builders and macros.
@@ -497,27 +472,30 @@ impl PanelBuilder<StatKind> {
     /// Sets whether Grafana colors the value, background, or neither.
     #[must_use]
     pub fn color_mode(mut self, mode: StatColorMode) -> Self {
-        self.panel
-            .options
-            .insert("colorMode".to_owned(), json!(mode.as_grafana()));
+        self.panel.options.insert(
+            "colorMode".to_owned(),
+            json!(crate::grafana::stat_color_mode(mode)),
+        );
         self
     }
 
     /// Sets area-sparkline or no-sparkline rendering.
     #[must_use]
     pub fn graph_mode(mut self, mode: StatGraphMode) -> Self {
-        self.panel
-            .options
-            .insert("graphMode".to_owned(), json!(mode.as_grafana()));
+        self.panel.options.insert(
+            "graphMode".to_owned(),
+            json!(crate::grafana::stat_graph_mode(mode)),
+        );
         self
     }
 
     /// Sets the value orientation.
     #[must_use]
     pub fn orientation(mut self, orientation: Orientation) -> Self {
-        self.panel
-            .options
-            .insert("orientation".to_owned(), json!(orientation.as_grafana()));
+        self.panel.options.insert(
+            "orientation".to_owned(),
+            json!(crate::grafana::orientation(orientation)),
+        );
         self
     }
 
@@ -533,9 +511,10 @@ impl PanelBuilder<StatKind> {
     /// Sets how fields are reduced to displayed values.
     #[must_use]
     pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
-        self.panel
-            .options
-            .insert("reduceOptions".to_owned(), options.as_grafana());
+        self.panel.options.insert(
+            "reduceOptions".to_owned(),
+            crate::grafana::reduce_options_value(&options),
+        );
         self
     }
 }
@@ -544,18 +523,20 @@ impl PanelBuilder<GaugeKind> {
     /// Sets the value orientation.
     #[must_use]
     pub fn orientation(mut self, orientation: Orientation) -> Self {
-        self.panel
-            .options
-            .insert("orientation".to_owned(), json!(orientation.as_grafana()));
+        self.panel.options.insert(
+            "orientation".to_owned(),
+            json!(crate::grafana::orientation(orientation)),
+        );
         self
     }
 
     /// Sets how fields are reduced to displayed values.
     #[must_use]
     pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
-        self.panel
-            .options
-            .insert("reduceOptions".to_owned(), options.as_grafana());
+        self.panel.options.insert(
+            "reduceOptions".to_owned(),
+            crate::grafana::reduce_options_value(&options),
+        );
         self
     }
 }
@@ -596,7 +577,7 @@ impl PanelBuilder<TimeseriesKind> {
     pub fn line_interpolation(mut self, interpolation: LineInterpolation) -> Self {
         self.panel.field_config.custom.insert(
             "lineInterpolation".to_owned(),
-            json!(interpolation.as_grafana()),
+            json!(crate::grafana::line_interpolation(interpolation)),
         );
         self
     }
@@ -604,10 +585,10 @@ impl PanelBuilder<TimeseriesKind> {
     /// Sets point-marker visibility.
     #[must_use]
     pub fn show_points(mut self, visibility: PointVisibility) -> Self {
-        self.panel
-            .field_config
-            .custom
-            .insert("showPoints".to_owned(), json!(visibility.as_grafana()));
+        self.panel.field_config.custom.insert(
+            "showPoints".to_owned(),
+            json!(crate::grafana::point_visibility(visibility)),
+        );
         self
     }
 
@@ -624,10 +605,10 @@ impl PanelBuilder<TimeseriesKind> {
     /// Sets series stacking mode and group.
     #[must_use]
     pub fn stacking(mut self, stacking: Stacking) -> Self {
-        self.panel
-            .field_config
-            .custom
-            .insert("stacking".to_owned(), stacking.as_grafana());
+        self.panel.field_config.custom.insert(
+            "stacking".to_owned(),
+            crate::grafana::stacking_value(&stacking),
+        );
         self
     }
 
@@ -636,7 +617,7 @@ impl PanelBuilder<TimeseriesKind> {
     pub fn tooltip(mut self, tooltip: Tooltip) -> Self {
         self.panel
             .options
-            .insert("tooltip".to_owned(), tooltip.as_grafana());
+            .insert("tooltip".to_owned(), crate::grafana::tooltip_value(tooltip));
         self
     }
 }
@@ -645,27 +626,30 @@ impl PanelBuilder<BarGaugeKind> {
     /// Sets the visual fill style.
     #[must_use]
     pub fn display_mode(mut self, mode: BarGaugeDisplayMode) -> Self {
-        self.panel
-            .options
-            .insert("displayMode".to_owned(), json!(mode.as_grafana()));
+        self.panel.options.insert(
+            "displayMode".to_owned(),
+            json!(crate::grafana::bar_gauge_display_mode(mode)),
+        );
         self
     }
 
     /// Sets the bar orientation.
     #[must_use]
     pub fn orientation(mut self, orientation: Orientation) -> Self {
-        self.panel
-            .options
-            .insert("orientation".to_owned(), json!(orientation.as_grafana()));
+        self.panel.options.insert(
+            "orientation".to_owned(),
+            json!(crate::grafana::orientation(orientation)),
+        );
         self
     }
 
     /// Sets how fields are reduced to displayed bars.
     #[must_use]
     pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
-        self.panel
-            .options
-            .insert("reduceOptions".to_owned(), options.as_grafana());
+        self.panel.options.insert(
+            "reduceOptions".to_owned(),
+            crate::grafana::reduce_options_value(&options),
+        );
         self
     }
 }

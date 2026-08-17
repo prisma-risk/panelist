@@ -25,11 +25,132 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use crate::{DataSource, GridPos, Legend, LegendMode, Panel, PanelKind, Row};
+use crate::{
+    BarGaugeDisplayMode, DataSource, GridPos, Legend, LegendMode, LineInterpolation, Orientation,
+    Panel, PanelKind, PointVisibility, ReduceOptions, Row, Stacking, StackingMode, StatColorMode,
+    StatGraphMode, TextMode, Tooltip, TooltipMode, TooltipSort,
+};
 
 use super::field::normalize_field_config;
 use super::query::normalize_targets;
 use super::wire::{GrafanaGridPos, GrafanaLink, GrafanaPanel};
+
+pub(crate) fn plugin_id(kind: &PanelKind) -> &str {
+    match kind {
+        PanelKind::Timeseries => "timeseries",
+        PanelKind::Stat => "stat",
+        PanelKind::Gauge => "gauge",
+        PanelKind::Table => "table",
+        PanelKind::Text => "text",
+        PanelKind::BarGauge => "bargauge",
+        PanelKind::Heatmap => "heatmap",
+        PanelKind::Raw(plugin_id) => plugin_id,
+    }
+}
+
+pub(crate) const fn text_mode(mode: TextMode) -> &'static str {
+    match mode {
+        TextMode::Markdown => "markdown",
+        TextMode::Html => "html",
+        TextMode::Code => "code",
+    }
+}
+
+pub(crate) const fn orientation(orientation: Orientation) -> &'static str {
+    match orientation {
+        Orientation::Auto => "auto",
+        Orientation::Horizontal => "horizontal",
+        Orientation::Vertical => "vertical",
+    }
+}
+
+pub(crate) const fn stat_color_mode(mode: StatColorMode) -> &'static str {
+    match mode {
+        StatColorMode::Value => "value",
+        StatColorMode::Background => "background",
+        StatColorMode::None => "none",
+    }
+}
+
+pub(crate) const fn stat_graph_mode(mode: StatGraphMode) -> &'static str {
+    match mode {
+        StatGraphMode::Area => "area",
+        StatGraphMode::None => "none",
+    }
+}
+
+pub(crate) const fn line_interpolation(interpolation: LineInterpolation) -> &'static str {
+    match interpolation {
+        LineInterpolation::Linear => "linear",
+        LineInterpolation::Smooth => "smooth",
+        LineInterpolation::StepBefore => "stepBefore",
+        LineInterpolation::StepAfter => "stepAfter",
+    }
+}
+
+pub(crate) const fn point_visibility(visibility: PointVisibility) -> &'static str {
+    match visibility {
+        PointVisibility::Auto => "auto",
+        PointVisibility::Always => "always",
+        PointVisibility::Never => "never",
+    }
+}
+
+pub(crate) const fn stacking_mode(mode: StackingMode) -> &'static str {
+    match mode {
+        StackingMode::None => "none",
+        StackingMode::Normal => "normal",
+        StackingMode::Percent => "percent",
+    }
+}
+
+pub(crate) const fn tooltip_mode(mode: TooltipMode) -> &'static str {
+    match mode {
+        TooltipMode::Single => "single",
+        TooltipMode::Multi => "multi",
+        TooltipMode::None => "none",
+    }
+}
+
+pub(crate) const fn tooltip_sort(sort: TooltipSort) -> &'static str {
+    match sort {
+        TooltipSort::None => "none",
+        TooltipSort::Ascending => "asc",
+        TooltipSort::Descending => "desc",
+    }
+}
+
+pub(crate) const fn bar_gauge_display_mode(mode: BarGaugeDisplayMode) -> &'static str {
+    match mode {
+        BarGaugeDisplayMode::Basic => "basic",
+        BarGaugeDisplayMode::Gradient => "gradient",
+        BarGaugeDisplayMode::Lcd => "lcd",
+    }
+}
+
+pub(crate) fn stacking_value(stacking: &Stacking) -> Value {
+    json!({"mode": stacking_mode(stacking.mode), "group": stacking.group})
+}
+
+pub(crate) fn tooltip_value(tooltip: Tooltip) -> Value {
+    json!({
+        "mode": tooltip_mode(tooltip.mode),
+        "sort": tooltip_sort(tooltip.sort),
+        "hideZeros": tooltip.hide_zeros,
+    })
+}
+
+pub(crate) fn reduce_options_value(options: &ReduceOptions) -> Value {
+    json!({
+        "values": options.values,
+        "calcs": options
+            .calculations
+            .iter()
+            .map(|calculation| crate::grafana::field::reducer(*calculation))
+            .collect::<Vec<_>>(),
+        "fields": options.fields,
+    })
+}
 
 pub(crate) fn normalize_row(row: &Row, id: u32, y: u16, panels: Vec<GrafanaPanel>) -> GrafanaPanel {
     GrafanaPanel {
@@ -68,7 +189,7 @@ pub(crate) fn normalize_panel(
 
     GrafanaPanel {
         id,
-        kind: panel.kind.plugin_id().to_owned(),
+        kind: plugin_id(&panel.kind).to_owned(),
         title: panel.title.clone(),
         description: panel.description.clone(),
         grid_pos: grid.into(),
@@ -122,11 +243,11 @@ pub(crate) fn default_panel_options(panel: &Panel) -> BTreeMap<String, Value> {
             let (mode, content) = panel
                 .text
                 .as_ref()
-                .map_or((crate::TextMode::Markdown, ""), |(mode, content)| {
+                .map_or((TextMode::Markdown, ""), |(mode, content)| {
                     (*mode, content.as_str())
                 });
             options.insert("content".to_owned(), json!(content));
-            options.insert("mode".to_owned(), json!(mode.as_grafana()));
+            options.insert("mode".to_owned(), json!(text_mode(mode)));
         }
         PanelKind::BarGauge => {
             options.insert("displayMode".to_owned(), json!("gradient"));
@@ -169,7 +290,7 @@ pub(crate) fn legend_value(legend: Option<&Legend>) -> Value {
         "calcs": legend
             .calculations
             .into_iter()
-            .map(|calculation| calculation.as_grafana())
+            .map(|calculation| crate::grafana::field::reducer(calculation))
             .collect::<Vec<_>>(),
     })
 }

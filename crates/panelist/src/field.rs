@@ -60,21 +60,6 @@ impl Unit {
     pub fn custom(unit: impl Into<String>) -> Self {
         Self::Custom(unit.into())
     }
-
-    pub(crate) fn as_grafana(&self) -> &str {
-        match self {
-            Self::None => "none",
-            Self::Seconds => "s",
-            Self::Milliseconds => "ms",
-            Self::Bytes => "bytes",
-            Self::BytesPerSecond => "Bps",
-            Self::Percent => "percent",
-            Self::RequestsPerSecond => "reqps",
-            Self::OperationsPerSecond => "ops",
-            Self::Short => "short",
-            Self::Custom(value) => value,
-        }
-    }
 }
 
 /// A Grafana color name or custom color value.
@@ -102,18 +87,6 @@ impl Color {
     #[must_use]
     pub fn custom(color: impl Into<String>) -> Self {
         Self::Custom(color.into())
-    }
-
-    pub(crate) fn as_grafana(&self) -> &str {
-        match self {
-            Self::Green => "green",
-            Self::Yellow => "yellow",
-            Self::Red => "red",
-            Self::Blue => "blue",
-            Self::Orange => "orange",
-            Self::Purple => "purple",
-            Self::Custom(value) => value,
-        }
     }
 }
 

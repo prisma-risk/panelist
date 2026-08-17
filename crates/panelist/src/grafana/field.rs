@@ -27,18 +27,55 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::{
-    ColorScheme, FieldConfig, FieldOverride, OverrideMatcher, OverrideProperty, PanelKind,
-    ThresholdMode, Thresholds,
+    Color, ColorScheme, FieldConfig, FieldOverride, OverrideMatcher, OverrideProperty, PanelKind,
+    Reducer, ThresholdMode, Thresholds, Unit,
 };
 
 use super::wire::{
     GrafanaFieldConfig, GrafanaFieldOverride, GrafanaMatcher, GrafanaOverrideProperty,
 };
 
+pub(crate) fn unit(unit: &Unit) -> &str {
+    match unit {
+        Unit::None => "none",
+        Unit::Seconds => "s",
+        Unit::Milliseconds => "ms",
+        Unit::Bytes => "bytes",
+        Unit::BytesPerSecond => "Bps",
+        Unit::Percent => "percent",
+        Unit::RequestsPerSecond => "reqps",
+        Unit::OperationsPerSecond => "ops",
+        Unit::Short => "short",
+        Unit::Custom(value) => value,
+    }
+}
+
+pub(crate) fn color(color: &Color) -> &str {
+    match color {
+        Color::Green => "green",
+        Color::Yellow => "yellow",
+        Color::Red => "red",
+        Color::Blue => "blue",
+        Color::Orange => "orange",
+        Color::Purple => "purple",
+        Color::Custom(value) => value,
+    }
+}
+
+pub(crate) const fn reducer(reducer: Reducer) -> &'static str {
+    match reducer {
+        Reducer::Last => "lastNotNull",
+        Reducer::Min => "min",
+        Reducer::Max => "max",
+        Reducer::Mean => "mean",
+        Reducer::Total => "sum",
+    }
+}
+
 pub(crate) fn normalize_field_config(config: &FieldConfig, kind: &PanelKind) -> GrafanaFieldConfig {
     let mut defaults = BTreeMap::new();
-    if let Some(unit) = &config.unit {
-        defaults.insert("unit".to_owned(), json!(unit.as_grafana()));
+    if let Some(field_unit) = &config.unit {
+        defaults.insert("unit".to_owned(), json!(unit(field_unit)));
     }
     insert_number(&mut defaults, "min", config.min);
     insert_number(&mut defaults, "max", config.max);
@@ -61,8 +98,8 @@ pub(crate) fn normalize_field_config(config: &FieldConfig, kind: &PanelKind) -> 
             .map(|mapping| {
                 let mut result = serde_json::Map::new();
                 result.insert("text".to_owned(), json!(mapping.text));
-                if let Some(color) = &mapping.color {
-                    result.insert("color".to_owned(), json!(color.as_grafana()));
+                if let Some(mapping_color) = &mapping.color {
+                    result.insert("color".to_owned(), json!(color(mapping_color)));
                 }
                 (mapping.value.clone(), Value::Object(result))
             })
@@ -132,7 +169,7 @@ pub(crate) fn normalize_override(field_override: &FieldOverride) -> GrafanaField
             .properties
             .iter()
             .map(|property| match property {
-                OverrideProperty::Unit(unit) => property_value("unit", unit.as_grafana()),
+                OverrideProperty::Unit(value) => property_value("unit", unit(value)),
                 OverrideProperty::Min(value) => number_property("min", *value),
                 OverrideProperty::Max(value) => number_property("max", *value),
                 OverrideProperty::Decimals(value) => property_value("decimals", *value),
@@ -175,11 +212,11 @@ pub(crate) fn insert_number(map: &mut BTreeMap<String, Value>, key: &str, number
     }
 }
 
-pub(crate) fn color_scheme_value(color: &ColorScheme) -> Value {
-    match color {
+pub(crate) fn color_scheme_value(scheme: &ColorScheme) -> Value {
+    match scheme {
         ColorScheme::Thresholds => json!({"mode": "thresholds"}),
         ColorScheme::ClassicPalette => json!({"mode": "palette-classic"}),
-        ColorScheme::Fixed(color) => json!({"mode": "fixed", "fixedColor": color.as_grafana()}),
+        ColorScheme::Fixed(value) => json!({"mode": "fixed", "fixedColor": color(value)}),
         ColorScheme::Continuous(scheme) => json!({"mode": scheme}),
     }
 }
@@ -191,15 +228,15 @@ pub(crate) fn thresholds_value(thresholds: &Thresholds) -> Value {
         .first()
         .is_none_or(|step| step.value.is_some())
     {
-        let color = thresholds
+        let step_color = thresholds
             .steps
             .first()
-            .map_or("green", |step| step.color.as_grafana());
-        steps.push(json!({"color": color, "value": null}));
+            .map_or("green", |step| color(&step.color));
+        steps.push(json!({"color": step_color, "value": null}));
     }
     steps.extend(thresholds.steps.iter().map(|step| {
         json!({
-            "color": step.color.as_grafana(),
+            "color": color(&step.color),
             "value": step.value,
         })
     }));

@@ -36,6 +36,10 @@ mod wire;
 pub(crate) use wire::NormalizedDashboard;
 
 use layout::{FlowLayout, IdAllocator, explicit_panel_ids};
+pub(crate) use panel::{
+    bar_gauge_display_mode, line_interpolation, orientation, point_visibility,
+    reduce_options_value, stacking_value, stat_color_mode, stat_graph_mode, tooltip_value,
+};
 use panel::{normalize_panel, normalize_row};
 use validate::validate;
 use variable::normalize_variable;
