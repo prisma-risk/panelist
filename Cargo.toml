@@ -13,7 +13,7 @@ documentation = "https://docs.rs/panelist"
 authors = ["Sebastian Thiebaud <sebastian@prismarisk.com>"]
 description = "Concise, strongly typed Grafana dashboards as Rust code"
 readme = "README.md"
-publish = false
+publish = true
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

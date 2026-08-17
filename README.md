@@ -36,14 +36,11 @@ review in Git and close to Grafana's native dashboard model.
 
 ## Status
 
-Panelist is under active development and is not published to crates.io yet. The
-repository is private during its initial incubation, but the crate is licensed,
-documented, and structured for a later public release. Until then, use a path
-dependency from another checkout:
+Panelist is under active development. Add the current release from crates.io:
 
 ```toml
 [dependencies]
-panelist = { path = "../panelist/crates/panelist" }
+panelist = "0.1"
 ```
 
 The minimum supported Rust version is 1.96. Panelist uses Rust 2024 and has no
@@ -233,8 +230,7 @@ Run one with `cargo run -p panelist --example basic`.
   and data links.
 - Add more datasource query types without turning the core crate into an API
   client.
-- Publish `panelist` to crates.io after the incubation and public-readiness
-  review.
+- Stabilize the API from real-world dashboard authoring feedback.
 
 ## Development
 
