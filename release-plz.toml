@@ -1,8 +1,8 @@
 # release-plz configuration: https://release-plz.ieni.dev/docs
 #
-# Dispatch the release-plz workflow to open or update a release PR. Merging
-# that PR publishes the crate, creates a signed tag, and creates a GitHub
-# Release.
+# Dispatch the release-plz workflow with `release-pr` to prepare a release.
+# After merging that PR, dispatch it again with `release` to publish the crate,
+# create a signed tag, and create a GitHub Release.
 
 [workspace]
 # Keep dependency updates in dedicated pull requests.

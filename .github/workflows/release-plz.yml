@@ -1,16 +1,19 @@
 name: release-plz
 
-# Release PRs are cut on demand. Merging one updates CHANGELOG.md, which
-# triggers the publish job. release-plz.toml is included in the push filter so
-# the initial automation change publishes the already-prepared 0.2.0 release.
+# Both phases are manual. Use `release-pr` to prepare the version and changelog,
+# then use `release` after that PR is merged to publish the prepared version.
+# Pushes to main never cut or publish a release.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - '**/CHANGELOG.md'
-      - release-plz.toml
+    inputs:
+      command:
+        description: Release phase to run
+        required: true
+        default: release-pr
+        type: choice
+        options:
+          - release-pr
+          - release
 
 permissions:
   contents: read
@@ -20,7 +23,7 @@ env:
 
 jobs:
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.command == 'release'
     name: release-plz release
     runs-on: ubuntu-latest
     environment: crates-io
@@ -72,7 +75,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   release-pr:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.command == 'release-pr'
     name: release-plz PR
     runs-on: ubuntu-latest
     permissions:
