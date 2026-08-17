@@ -1,19 +1,14 @@
 name: release-plz
 
-# Both phases are manual. Use `release-pr` to prepare the version and changelog,
-# then use `release` after that PR is merged to publish the prepared version.
-# Pushes to main never cut or publish a release.
+# Manually dispatch this workflow to open or update the release PR. Merging that
+# PR changes release-plz-owned CHANGELOG.md and automatically publishes it.
 on:
   workflow_dispatch:
-    inputs:
-      command:
-        description: Release phase to run
-        required: true
-        default: release-pr
-        type: choice
-        options:
-          - release-pr
-          - release
+  push:
+    branches:
+      - main
+    paths:
+      - '**/CHANGELOG.md'
 
 permissions:
   contents: read
@@ -23,7 +18,7 @@ env:
 
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && inputs.command == 'release'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: release-plz release
     runs-on: ubuntu-latest
     environment: crates-io
@@ -75,7 +70,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   release-pr:
-    if: github.ref == 'refs/heads/main' && inputs.command == 'release-pr'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     name: release-plz PR
     runs-on: ubuntu-latest
     permissions:
