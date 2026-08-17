@@ -214,7 +214,6 @@ pub struct FieldConfig {
     pub(crate) color: Option<ColorScheme>,
     pub(crate) thresholds: Option<Thresholds>,
     pub(crate) mappings: Vec<ValueMapping>,
-    pub(crate) cell: Option<TableCell>,
     pub(crate) custom: BTreeMap<String, Value>,
     pub(crate) overrides: Vec<FieldOverride>,
 }
@@ -279,13 +278,6 @@ impl FieldConfig {
     #[must_use]
     pub fn mapping(mut self, mapping: ValueMapping) -> Self {
         self.mappings.push(mapping);
-        self
-    }
-
-    /// Sets the default table cell renderer.
-    #[must_use]
-    pub fn cell(mut self, cell: impl Into<TableCell>) -> Self {
-        self.cell = Some(cell.into());
         self
     }
 

@@ -238,7 +238,8 @@ impl TableSort {
 }
 
 /// Typed authoring state for the Grafana table panel.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct TableOptions {
     pub(crate) sort_by: Vec<TableSort>,
+    pub(crate) cell: Option<TableCell>,
 }

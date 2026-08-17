@@ -695,7 +695,7 @@ impl PanelBuilder<TableKind> {
     /// Sets the default cell renderer for every column.
     #[must_use]
     pub fn cell(mut self, cell: impl Into<TableCell>) -> Self {
-        self.panel.field_config.cell = Some(cell.into());
+        self.panel.kind_options.table().cell = Some(cell.into());
         self
     }
 }

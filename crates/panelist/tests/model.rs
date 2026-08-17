@@ -461,6 +461,22 @@ fn field_config_no_longer_wipes_a_typed_setter() {
 }
 
 #[test]
+fn cell_survives_a_later_field_config() {
+    let dashboard = Dashboard::new("Cell survives field config").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .cell(TableCellType::Gauge)
+            .field_config(FieldConfig::new().unit(Unit::Seconds)),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(
+        value["panels"][0]["fieldConfig"]["defaults"]["custom"]["cellOptions"],
+        json!({"type": "gauge"})
+    );
+}
+
+#[test]
 fn field_config_custom_still_beats_a_typed_setter_regardless_of_order() {
     let dashboard = Dashboard::new("Field config custom wins").panel(
         Timeseries::new("Latency")

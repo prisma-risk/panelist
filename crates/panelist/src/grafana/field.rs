@@ -81,9 +81,6 @@ pub(crate) fn normalize_field_config(
 
     let mut custom = default_field_custom(kind);
     custom.extend(typed_field_custom(kind_options));
-    if let Some(cell) = &config.cell {
-        custom.insert("cellOptions".to_owned(), cell_options_value(cell));
-    }
     custom.extend(config.custom.clone());
     if !custom.is_empty() {
         defaults.insert("custom".to_owned(), json!(custom));
@@ -126,16 +123,20 @@ pub(crate) fn typed_field_custom(options: &PanelOptions) -> BTreeMap<String, Val
         // Exhaustive on purpose: a new `PanelOptions` variant that owns
         // `fieldConfig.defaults.custom` keys must fail to compile here until
         // it is spelled out, rather than silently falling through and
-        // dropping its keys. Table's own cell renderer lives on
-        // `FieldConfig.cell`, not here, and Heatmap's options all live under
-        // the panel's `options` object rather than `fieldConfig.defaults.custom`,
-        // so both join this no-op group.
+        // dropping its keys. Heatmap's options all live under the panel's
+        // `options` object rather than `fieldConfig.defaults.custom`, so it
+        // joins this no-op group. Table has its own arm below because its
+        // cell renderer lives at `custom.cellOptions`.
         PanelOptions::None
         | PanelOptions::Stat(_)
         | PanelOptions::Gauge(_)
         | PanelOptions::BarGauge(_)
-        | PanelOptions::Table(_)
         | PanelOptions::Heatmap(_) => {}
+        PanelOptions::Table(table) => {
+            if let Some(cell) = &table.cell {
+                output.insert("cellOptions".to_owned(), cell_options_value(cell));
+            }
+        }
         PanelOptions::Timeseries(timeseries) => {
             if let Some(opacity) = timeseries.fill_opacity {
                 output.insert("fillOpacity".to_owned(), json!(opacity));
