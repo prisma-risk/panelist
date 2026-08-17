@@ -23,12 +23,15 @@
 
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::{
     BarGaugeDisplayMode, ColorScheme, DashboardLink, DataSource, FieldConfig, FieldOverride,
     Legend, LineInterpolation, Orientation, PointVisibility, Query, ReduceOptions, Stacking,
     StatColorMode, StatGraphMode, Thresholds, Tooltip, Unit, ValueMapping,
+    heatmap::HeatmapOptions,
+    table::TableOptions,
+    visualization::{BarGaugeOptions, GaugeOptions, StatOptions, TimeseriesOptions},
 };
 
 /// An explicit position in Grafana's 24-column dashboard grid.
@@ -108,7 +111,8 @@ pub struct Panel {
     pub(crate) text: Option<(TextMode, String)>,
     pub(crate) links: Vec<DashboardLink>,
     pub(crate) transparent: bool,
-    pub(crate) options: BTreeMap<String, Value>,
+    pub(crate) kind_options: PanelOptions,
+    pub(crate) raw_options: BTreeMap<String, Value>,
     pub(crate) extra: BTreeMap<String, Value>,
 }
 
@@ -129,7 +133,8 @@ impl Panel {
             text: None,
             links: Vec::new(),
             transparent: false,
-            options: BTreeMap::new(),
+            kind_options: PanelOptions::None,
+            raw_options: BTreeMap::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -146,6 +151,61 @@ impl Panel {
         &self.kind
     }
 }
+
+/// Typed, visualization-specific panel options.
+///
+/// `Table` and `Heatmap` are not constructed anywhere yet: Tasks 9 and 10 add
+/// the `TableKind`/`HeatmapKind` builder setters that reach them via the
+/// `table()`/`heatmap()` accessors below. Remove this `allow` once both do.
+#[allow(
+    dead_code,
+    reason = "Table and Heatmap are constructed starting in tasks 9 and 10"
+)]
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) enum PanelOptions {
+    /// A visualization with no typed option surface.
+    #[default]
+    None,
+    Stat(StatOptions),
+    Gauge(GaugeOptions),
+    Timeseries(TimeseriesOptions),
+    BarGauge(BarGaugeOptions),
+    Table(TableOptions),
+    Heatmap(HeatmapOptions),
+}
+
+macro_rules! kind_options {
+    ($($method:ident => $variant:ident($type:ty)),+ $(,)?) => {
+        // `table()`/`heatmap()` have no callers until Tasks 9 and 10 add the
+        // builder setters that reach them; see the matching note on
+        // `PanelOptions`. Remove this `allow` once both do.
+        #[allow(dead_code, reason = "table()/heatmap() gain callers in tasks 9 and 10")]
+        impl PanelOptions {
+            $(
+                pub(crate) fn $method(&mut self) -> &mut $type {
+                    if !matches!(self, Self::$variant(_)) {
+                        *self = Self::$variant(<$type>::default());
+                    }
+                    match self {
+                        Self::$variant(options) => options,
+                        _ => unreachable!(
+                            concat!("just assigned PanelOptions::", stringify!($variant))
+                        ),
+                    }
+                }
+            )+
+        }
+    };
+}
+
+kind_options!(
+    stat => Stat(StatOptions),
+    gauge => Gauge(GaugeOptions),
+    timeseries => Timeseries(TimeseriesOptions),
+    bar_gauge => BarGauge(BarGaugeOptions),
+    table => Table(TableOptions),
+    heatmap => Heatmap(HeatmapOptions),
+);
 
 /// Marker trait implemented by typed panel builders.
 #[doc(hidden)]
@@ -424,7 +484,7 @@ impl<K: PanelType> PanelBuilder<K> {
     /// Adds a plugin-specific value under the panel's `options` object.
     #[must_use]
     pub fn option(mut self, key: impl Into<String>, value: Value) -> Self {
-        self.panel.options.insert(key.into(), value);
+        self.panel.raw_options.insert(key.into(), value);
         self
     }
 
@@ -472,49 +532,35 @@ impl PanelBuilder<StatKind> {
     /// Sets whether Grafana colors the value, background, or neither.
     #[must_use]
     pub fn color_mode(mut self, mode: StatColorMode) -> Self {
-        self.panel.options.insert(
-            "colorMode".to_owned(),
-            json!(crate::grafana::stat_color_mode(mode)),
-        );
+        self.panel.kind_options.stat().color_mode = Some(mode);
         self
     }
 
     /// Sets area-sparkline or no-sparkline rendering.
     #[must_use]
     pub fn graph_mode(mut self, mode: StatGraphMode) -> Self {
-        self.panel.options.insert(
-            "graphMode".to_owned(),
-            json!(crate::grafana::stat_graph_mode(mode)),
-        );
+        self.panel.kind_options.stat().graph_mode = Some(mode);
         self
     }
 
     /// Sets the value orientation.
     #[must_use]
     pub fn orientation(mut self, orientation: Orientation) -> Self {
-        self.panel.options.insert(
-            "orientation".to_owned(),
-            json!(crate::grafana::orientation(orientation)),
-        );
+        self.panel.kind_options.stat().orientation = Some(orientation);
         self
     }
 
     /// Controls Grafana's wide-layout treatment for value names and values.
     #[must_use]
     pub fn wide_layout(mut self, wide_layout: bool) -> Self {
-        self.panel
-            .options
-            .insert("wideLayout".to_owned(), json!(wide_layout));
+        self.panel.kind_options.stat().wide_layout = Some(wide_layout);
         self
     }
 
     /// Sets how fields are reduced to displayed values.
     #[must_use]
     pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
-        self.panel.options.insert(
-            "reduceOptions".to_owned(),
-            crate::grafana::reduce_options_value(&options),
-        );
+        self.panel.kind_options.stat().reduce = Some(options);
         self
     }
 }
@@ -523,20 +569,14 @@ impl PanelBuilder<GaugeKind> {
     /// Sets the value orientation.
     #[must_use]
     pub fn orientation(mut self, orientation: Orientation) -> Self {
-        self.panel.options.insert(
-            "orientation".to_owned(),
-            json!(crate::grafana::orientation(orientation)),
-        );
+        self.panel.kind_options.gauge().orientation = Some(orientation);
         self
     }
 
     /// Sets how fields are reduced to displayed values.
     #[must_use]
     pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
-        self.panel.options.insert(
-            "reduceOptions".to_owned(),
-            crate::grafana::reduce_options_value(&options),
-        );
+        self.panel.kind_options.gauge().reduce = Some(options);
         self
     }
 }
@@ -545,79 +585,56 @@ impl PanelBuilder<TimeseriesKind> {
     /// Sets the area fill opacity from 0 to 100.
     #[must_use]
     pub fn fill_opacity(mut self, opacity: f64) -> Self {
-        self.panel
-            .field_config
-            .custom
-            .insert("fillOpacity".to_owned(), json!(opacity));
+        self.panel.kind_options.timeseries().fill_opacity = Some(opacity);
         self
     }
 
     /// Sets the line width in pixels.
     #[must_use]
     pub fn line_width(mut self, width: f64) -> Self {
-        self.panel
-            .field_config
-            .custom
-            .insert("lineWidth".to_owned(), json!(width));
+        self.panel.kind_options.timeseries().line_width = Some(width);
         self
     }
 
     /// Sets the point-marker size in pixels.
     #[must_use]
     pub fn point_size(mut self, size: f64) -> Self {
-        self.panel
-            .field_config
-            .custom
-            .insert("pointSize".to_owned(), json!(size));
+        self.panel.kind_options.timeseries().point_size = Some(size);
         self
     }
 
     /// Sets line interpolation between samples.
     #[must_use]
     pub fn line_interpolation(mut self, interpolation: LineInterpolation) -> Self {
-        self.panel.field_config.custom.insert(
-            "lineInterpolation".to_owned(),
-            json!(crate::grafana::line_interpolation(interpolation)),
-        );
+        self.panel.kind_options.timeseries().line_interpolation = Some(interpolation);
         self
     }
 
     /// Sets point-marker visibility.
     #[must_use]
     pub fn show_points(mut self, visibility: PointVisibility) -> Self {
-        self.panel.field_config.custom.insert(
-            "showPoints".to_owned(),
-            json!(crate::grafana::point_visibility(visibility)),
-        );
+        self.panel.kind_options.timeseries().show_points = Some(visibility);
         self
     }
 
     /// Controls whether lines span null samples.
     #[must_use]
     pub fn span_nulls(mut self, span_nulls: bool) -> Self {
-        self.panel
-            .field_config
-            .custom
-            .insert("spanNulls".to_owned(), json!(span_nulls));
+        self.panel.kind_options.timeseries().span_nulls = Some(span_nulls);
         self
     }
 
     /// Sets series stacking mode and group.
     #[must_use]
     pub fn stacking(mut self, stacking: Stacking) -> Self {
-        self.panel.field_config.custom.insert(
-            "stacking".to_owned(),
-            crate::grafana::stacking_value(&stacking),
-        );
+        self.panel.kind_options.timeseries().stacking = Some(stacking);
         self
     }
 
     /// Sets typed tooltip behavior.
     #[must_use]
     pub fn tooltip(mut self, tooltip: Tooltip) -> Self {
-        self.panel
-            .options
-            .insert("tooltip".to_owned(), crate::grafana::tooltip_value(tooltip));
+        self.panel.kind_options.timeseries().tooltip = Some(tooltip);
         self
     }
 }
@@ -626,30 +643,21 @@ impl PanelBuilder<BarGaugeKind> {
     /// Sets the visual fill style.
     #[must_use]
     pub fn display_mode(mut self, mode: BarGaugeDisplayMode) -> Self {
-        self.panel.options.insert(
-            "displayMode".to_owned(),
-            json!(crate::grafana::bar_gauge_display_mode(mode)),
-        );
+        self.panel.kind_options.bar_gauge().display_mode = Some(mode);
         self
     }
 
     /// Sets the bar orientation.
     #[must_use]
     pub fn orientation(mut self, orientation: Orientation) -> Self {
-        self.panel.options.insert(
-            "orientation".to_owned(),
-            json!(crate::grafana::orientation(orientation)),
-        );
+        self.panel.kind_options.bar_gauge().orientation = Some(orientation);
         self
     }
 
     /// Sets how fields are reduced to displayed bars.
     #[must_use]
     pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
-        self.panel.options.insert(
-            "reduceOptions".to_owned(),
-            crate::grafana::reduce_options_value(&options),
-        );
+        self.panel.kind_options.bar_gauge().reduce = Some(options);
         self
     }
 }
@@ -750,7 +758,7 @@ impl RawPanel {
     /// Adds a plugin option.
     #[must_use]
     pub fn option(mut self, key: impl Into<String>, value: Value) -> Self {
-        self.panel.options.insert(key.into(), value);
+        self.panel.raw_options.insert(key.into(), value);
         self
     }
 

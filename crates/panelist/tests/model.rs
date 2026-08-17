@@ -378,3 +378,30 @@ fn reducers_serialize_for_legends_and_reduce_options() {
         json!(["mean", "sum"])
     );
 }
+
+#[test]
+fn raw_options_still_override_typed_panel_options() {
+    let dashboard = Dashboard::new("Precedence").panel(
+        Stat::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .color_mode(StatColorMode::Background)
+            .option("colorMode", json!("none")),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(value["panels"][0]["options"]["colorMode"], "none");
+}
+
+#[test]
+fn typed_panel_options_survive_a_later_unrelated_option() {
+    let dashboard = Dashboard::new("Merge").panel(
+        Stat::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .color_mode(StatColorMode::Background)
+            .option("textMode", json!("value")),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(value["panels"][0]["options"]["colorMode"], "background");
+    assert_eq!(value["panels"][0]["options"]["textMode"], "value");
+}

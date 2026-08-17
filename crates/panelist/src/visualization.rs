@@ -256,3 +256,41 @@ pub enum BarGaugeDisplayMode {
     /// Segmented LCD-style bar.
     Lcd,
 }
+
+/// Typed authoring state for the Grafana stat panel.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct StatOptions {
+    pub(crate) color_mode: Option<StatColorMode>,
+    pub(crate) graph_mode: Option<StatGraphMode>,
+    pub(crate) orientation: Option<Orientation>,
+    pub(crate) wide_layout: Option<bool>,
+    pub(crate) reduce: Option<ReduceOptions>,
+}
+
+/// Typed authoring state for the Grafana gauge panel.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct GaugeOptions {
+    pub(crate) orientation: Option<Orientation>,
+    pub(crate) reduce: Option<ReduceOptions>,
+}
+
+/// Typed authoring state for the Grafana time series panel.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct TimeseriesOptions {
+    pub(crate) fill_opacity: Option<f64>,
+    pub(crate) line_width: Option<f64>,
+    pub(crate) point_size: Option<f64>,
+    pub(crate) line_interpolation: Option<LineInterpolation>,
+    pub(crate) show_points: Option<PointVisibility>,
+    pub(crate) span_nulls: Option<bool>,
+    pub(crate) stacking: Option<Stacking>,
+    pub(crate) tooltip: Option<Tooltip>,
+}
+
+/// Typed authoring state for the Grafana bar-gauge panel.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct BarGaugeOptions {
+    pub(crate) display_mode: Option<BarGaugeDisplayMode>,
+    pub(crate) orientation: Option<Orientation>,
+    pub(crate) reduce: Option<ReduceOptions>,
+}

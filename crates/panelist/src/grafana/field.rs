@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 
 use crate::{
     Color, ColorScheme, FieldConfig, FieldOverride, OverrideMatcher, OverrideProperty, PanelKind,
-    Reducer, ThresholdMode, Thresholds, Unit,
+    Reducer, ThresholdMode, Thresholds, Unit, panel::PanelOptions,
 };
 
 use super::wire::{
@@ -72,7 +72,11 @@ pub(crate) const fn reducer(reducer: Reducer) -> &'static str {
     }
 }
 
-pub(crate) fn normalize_field_config(config: &FieldConfig, kind: &PanelKind) -> GrafanaFieldConfig {
+pub(crate) fn normalize_field_config(
+    config: &FieldConfig,
+    kind: &PanelKind,
+    kind_options: &PanelOptions,
+) -> GrafanaFieldConfig {
     let mut defaults = BTreeMap::new();
     if let Some(field_unit) = &config.unit {
         defaults.insert("unit".to_owned(), json!(unit(field_unit)));
@@ -111,6 +115,7 @@ pub(crate) fn normalize_field_config(config: &FieldConfig, kind: &PanelKind) -> 
     }
 
     let mut custom = default_field_custom(kind);
+    custom.extend(crate::grafana::panel::typed_field_custom(kind_options));
     custom.extend(config.custom.clone());
     if !custom.is_empty() {
         defaults.insert("custom".to_owned(), json!(custom));

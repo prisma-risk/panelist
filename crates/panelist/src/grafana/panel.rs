@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 use crate::{
     BarGaugeDisplayMode, DataSource, GridPos, Legend, LegendMode, LineInterpolation, Orientation,
     Panel, PanelKind, PointVisibility, ReduceOptions, Row, Stacking, StackingMode, StatColorMode,
-    StatGraphMode, TextMode, Tooltip, TooltipMode, TooltipSort,
+    StatGraphMode, TextMode, Tooltip, TooltipMode, TooltipSort, panel::PanelOptions,
 };
 
 use super::field::normalize_field_config;
@@ -185,7 +185,8 @@ pub(crate) fn normalize_panel(
     let datasource = panel.datasource.as_ref().or(default_datasource).cloned();
     let targets = normalize_targets(&panel.queries, datasource.as_ref());
     let mut options = default_panel_options(panel);
-    options.extend(panel.options.clone());
+    options.extend(typed_panel_options(&panel.kind_options));
+    options.extend(panel.raw_options.clone());
 
     GrafanaPanel {
         id,
@@ -195,7 +196,11 @@ pub(crate) fn normalize_panel(
         grid_pos: grid.into(),
         datasource,
         targets,
-        field_config: Some(normalize_field_config(&panel.field_config, &panel.kind)),
+        field_config: Some(normalize_field_config(
+            &panel.field_config,
+            &panel.kind,
+            &panel.kind_options,
+        )),
         options: Some(options),
         transparent: panel.transparent,
         links: panel.links.iter().map(GrafanaLink::from).collect(),
@@ -271,6 +276,90 @@ pub(crate) fn default_panel_options(panel: &Panel) -> BTreeMap<String, Value> {
         PanelKind::Raw(_) => {}
     }
     options
+}
+
+pub(crate) fn typed_panel_options(options: &PanelOptions) -> BTreeMap<String, Value> {
+    let mut output = BTreeMap::new();
+    match options {
+        PanelOptions::None | PanelOptions::Table(_) | PanelOptions::Heatmap(_) => {}
+        PanelOptions::Stat(stat) => {
+            if let Some(mode) = stat.color_mode {
+                output.insert("colorMode".to_owned(), json!(stat_color_mode(mode)));
+            }
+            if let Some(mode) = stat.graph_mode {
+                output.insert("graphMode".to_owned(), json!(stat_graph_mode(mode)));
+            }
+            if let Some(value) = stat.orientation {
+                output.insert("orientation".to_owned(), json!(orientation(value)));
+            }
+            if let Some(wide_layout) = stat.wide_layout {
+                output.insert("wideLayout".to_owned(), json!(wide_layout));
+            }
+            if let Some(reduce) = &stat.reduce {
+                output.insert("reduceOptions".to_owned(), reduce_options_value(reduce));
+            }
+        }
+        PanelOptions::Gauge(gauge) => {
+            if let Some(value) = gauge.orientation {
+                output.insert("orientation".to_owned(), json!(orientation(value)));
+            }
+            if let Some(reduce) = &gauge.reduce {
+                output.insert("reduceOptions".to_owned(), reduce_options_value(reduce));
+            }
+        }
+        PanelOptions::BarGauge(bar_gauge) => {
+            if let Some(mode) = bar_gauge.display_mode {
+                output.insert(
+                    "displayMode".to_owned(),
+                    json!(bar_gauge_display_mode(mode)),
+                );
+            }
+            if let Some(value) = bar_gauge.orientation {
+                output.insert("orientation".to_owned(), json!(orientation(value)));
+            }
+            if let Some(reduce) = &bar_gauge.reduce {
+                output.insert("reduceOptions".to_owned(), reduce_options_value(reduce));
+            }
+        }
+        PanelOptions::Timeseries(timeseries) => {
+            if let Some(tooltip) = timeseries.tooltip {
+                output.insert("tooltip".to_owned(), tooltip_value(tooltip));
+            }
+        }
+    }
+    output
+}
+
+pub(crate) fn typed_field_custom(options: &PanelOptions) -> BTreeMap<String, Value> {
+    let mut output = BTreeMap::new();
+    let PanelOptions::Timeseries(timeseries) = options else {
+        return output;
+    };
+    if let Some(opacity) = timeseries.fill_opacity {
+        output.insert("fillOpacity".to_owned(), json!(opacity));
+    }
+    if let Some(width) = timeseries.line_width {
+        output.insert("lineWidth".to_owned(), json!(width));
+    }
+    if let Some(size) = timeseries.point_size {
+        output.insert("pointSize".to_owned(), json!(size));
+    }
+    if let Some(interpolation) = timeseries.line_interpolation {
+        output.insert(
+            "lineInterpolation".to_owned(),
+            json!(line_interpolation(interpolation)),
+        );
+    }
+    if let Some(visibility) = timeseries.show_points {
+        output.insert("showPoints".to_owned(), json!(point_visibility(visibility)));
+    }
+    if let Some(span_nulls) = timeseries.span_nulls {
+        output.insert("spanNulls".to_owned(), json!(span_nulls));
+    }
+    if let Some(stacking) = &timeseries.stacking {
+        output.insert("stacking".to_owned(), stacking_value(stacking));
+    }
+    output
 }
 
 pub(crate) fn legend_value(legend: Option<&Legend>) -> Value {
