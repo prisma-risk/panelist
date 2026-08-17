@@ -166,6 +166,8 @@ struct GrafanaTarget {
     datasource: Option<DataSource>,
     expr: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    editor_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     legend_format: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     instant: bool,
@@ -269,7 +271,7 @@ pub(crate) fn normalize(dashboard: &Dashboard) -> Result<NormalizedDashboard, Va
         tags: dashboard.tags.clone(),
         timezone: dashboard.timezone.clone(),
         editable: dashboard.editable,
-        graph_tooltip: 0,
+        graph_tooltip: dashboard.cursor_sync.as_grafana(),
         panels,
         time: GrafanaTimeRange {
             from: dashboard.time.from.clone(),
@@ -286,7 +288,7 @@ pub(crate) fn normalize(dashboard: &Dashboard) -> Result<NormalizedDashboard, Va
         annotations: GrafanaAnnotations { list: Vec::new() },
         refresh: dashboard.refresh.clone(),
         schema_version: dashboard.schema_version,
-        version: 0,
+        version: dashboard.version,
         links: dashboard.links.iter().map(GrafanaLink::from).collect(),
         extra: dashboard.extra.clone(),
     })
@@ -377,6 +379,7 @@ fn normalize_targets(
                 ref_id,
                 datasource: options.datasource.as_ref().or(panel_datasource).cloned(),
                 expr: query.expression().to_owned(),
+                editor_mode: options.editor_mode.map(crate::QueryEditorMode::as_grafana),
                 legend_format: options.legend.clone(),
                 instant: options.instant,
                 range: options.range,
@@ -511,6 +514,24 @@ fn normalize_field_config(config: &FieldConfig, kind: &PanelKind) -> GrafanaFiel
     if let Some(thresholds) = &config.thresholds {
         defaults.insert("thresholds".to_owned(), thresholds_value(thresholds));
     }
+    if !config.mappings.is_empty() {
+        let options = config
+            .mappings
+            .iter()
+            .map(|mapping| {
+                let mut result = serde_json::Map::new();
+                result.insert("text".to_owned(), json!(mapping.text));
+                if let Some(color) = &mapping.color {
+                    result.insert("color".to_owned(), json!(color.as_grafana()));
+                }
+                (mapping.value.clone(), Value::Object(result))
+            })
+            .collect::<serde_json::Map<_, _>>();
+        defaults.insert(
+            "mappings".to_owned(),
+            json!([{"type": "value", "options": options}]),
+        );
+    }
 
     let mut custom = default_field_custom(kind);
     custom.extend(config.custom.clone());
@@ -581,6 +602,10 @@ fn normalize_override(field_override: &FieldOverride) -> GrafanaFieldOverride {
                     value: color_scheme_value(value),
                 },
                 OverrideProperty::LineWidth(value) => property_value("custom.lineWidth", *value),
+                OverrideProperty::Thresholds(value) => GrafanaOverrideProperty {
+                    id: "thresholds".to_owned(),
+                    value: thresholds_value(value),
+                },
                 OverrideProperty::Custom { id, value } => GrafanaOverrideProperty {
                     id: id.clone(),
                     value: value.clone(),
@@ -652,15 +677,43 @@ fn normalize_variable(
     default_datasource: Option<&DataSource>,
 ) -> BTreeMap<String, Value> {
     match variable {
+        Variable::DataSource(variable) => {
+            let mut output = variable_base(
+                &variable.name,
+                "datasource",
+                variable.label.as_deref(),
+                variable.hidden,
+                variable.skip_url_sync,
+            );
+            output.insert("query".to_owned(), json!(variable.plugin_id));
+            output.insert("regex".to_owned(), json!(variable.regex));
+            output.insert("refresh".to_owned(), json!(variable.refresh.as_grafana()));
+            output.insert("multi".to_owned(), json!(false));
+            output.insert("includeAll".to_owned(), json!(false));
+            output.insert("allowCustomValue".to_owned(), json!(false));
+            output.insert("options".to_owned(), json!([]));
+            insert_current(&mut output, variable.current.as_ref());
+            output
+        }
         Variable::Query(variable) => {
-            let mut output = BTreeMap::new();
-            output.insert("name".to_owned(), json!(variable.name));
-            output.insert("type".to_owned(), json!("query"));
-            if let Some(label) = &variable.label {
-                output.insert("label".to_owned(), json!(label));
-            }
+            let mut output = variable_base(
+                &variable.name,
+                "query",
+                variable.label.as_deref(),
+                variable.hidden,
+                variable.skip_url_sync,
+            );
             let expression = variable.query.expression();
-            output.insert("query".to_owned(), json!(expression));
+            let ref_id = variable
+                .query
+                .options()
+                .ref_id
+                .as_deref()
+                .unwrap_or("StandardVariableQuery");
+            output.insert(
+                "query".to_owned(),
+                json!({"query": expression, "refId": ref_id}),
+            );
             output.insert("definition".to_owned(), json!(expression));
             if let Some(datasource) = variable
                 .datasource
@@ -671,69 +724,109 @@ fn normalize_variable(
                 output.insert("datasource".to_owned(), datasource_value(datasource));
             }
             output.insert("refresh".to_owned(), json!(variable.refresh.as_grafana()));
+            output.insert("sort".to_owned(), json!(variable.sort.as_grafana()));
             output.insert("multi".to_owned(), json!(variable.multi));
             output.insert("includeAll".to_owned(), json!(variable.include_all));
-            output.insert("hide".to_owned(), json!(u8::from(variable.hidden)));
-            output.insert("regex".to_owned(), json!(""));
+            output.insert("allValue".to_owned(), json!(variable.all_value));
+            output.insert(
+                "allowCustomValue".to_owned(),
+                json!(variable.allow_custom_value),
+            );
+            output.insert("regex".to_owned(), json!(variable.regex));
             output.insert("options".to_owned(), json!([]));
-            if let Some(default) = &variable.default {
-                output.insert(
-                    "current".to_owned(),
-                    json!({"selected": true, "text": default, "value": default}),
-                );
-            }
+            insert_current(&mut output, variable.current.as_ref());
             output
         }
         Variable::Custom(variable) => {
-            let selected = variable
-                .default
-                .as_ref()
-                .or_else(|| variable.values.first());
+            let fallback;
+            let current = if let Some(current) = variable.current.as_ref() {
+                Some(current)
+            } else {
+                fallback = variable
+                    .values
+                    .first()
+                    .map(|value| crate::VariableSelection::new(value.clone(), value.clone()));
+                fallback.as_ref()
+            };
             let options = variable
                 .values
                 .iter()
                 .map(|value| {
                     json!({
-                        "selected": selected == Some(value),
+                        "selected": current.is_some_and(|current| current.value == *value),
                         "text": value,
                         "value": value,
                     })
                 })
                 .collect::<Vec<_>>();
-            let mut output = BTreeMap::new();
-            output.insert("name".to_owned(), json!(variable.name));
-            output.insert("type".to_owned(), json!("custom"));
-            if let Some(label) = &variable.label {
-                output.insert("label".to_owned(), json!(label));
-            }
+            let mut output = variable_base(
+                &variable.name,
+                "custom",
+                variable.label.as_deref(),
+                variable.hidden,
+                variable.skip_url_sync,
+            );
             output.insert("query".to_owned(), json!(variable.values.join(",")));
             output.insert("options".to_owned(), json!(options));
             output.insert("multi".to_owned(), json!(variable.multi));
             output.insert("includeAll".to_owned(), json!(variable.include_all));
-            output.insert("hide".to_owned(), json!(u8::from(variable.hidden)));
-            if let Some(selected) = selected {
-                output.insert(
-                    "current".to_owned(),
-                    json!({"selected": true, "text": selected, "value": selected}),
-                );
-            }
+            output.insert("allValue".to_owned(), json!(variable.all_value));
+            output.insert(
+                "allowCustomValue".to_owned(),
+                json!(variable.allow_custom_value),
+            );
+            insert_current(&mut output, current);
             output
         }
         Variable::Constant(variable) => {
-            let mut output = BTreeMap::new();
-            output.insert("name".to_owned(), json!(variable.name));
-            output.insert("type".to_owned(), json!("constant"));
-            if let Some(label) = &variable.label {
-                output.insert("label".to_owned(), json!(label));
-            }
+            let mut output = variable_base(
+                &variable.name,
+                "constant",
+                variable.label.as_deref(),
+                variable.hidden,
+                false,
+            );
             output.insert("query".to_owned(), json!(variable.value));
-            output.insert("hide".to_owned(), json!(u8::from(variable.hidden)));
             output.insert(
                 "current".to_owned(),
                 json!({"selected": true, "text": variable.value, "value": variable.value}),
             );
             output
         }
+    }
+}
+
+fn variable_base(
+    name: &str,
+    kind: &str,
+    label: Option<&str>,
+    hidden: bool,
+    skip_url_sync: bool,
+) -> BTreeMap<String, Value> {
+    let mut output = BTreeMap::new();
+    output.insert("name".to_owned(), json!(name));
+    output.insert("type".to_owned(), json!(kind));
+    if let Some(label) = label {
+        output.insert("label".to_owned(), json!(label));
+    }
+    output.insert("hide".to_owned(), json!(u8::from(hidden)));
+    output.insert("skipUrlSync".to_owned(), json!(skip_url_sync));
+    output
+}
+
+fn insert_current(
+    output: &mut BTreeMap<String, Value>,
+    current: Option<&crate::VariableSelection>,
+) {
+    if let Some(current) = current {
+        output.insert(
+            "current".to_owned(),
+            json!({
+                "selected": current.selected,
+                "text": current.text,
+                "value": current.value,
+            }),
+        );
     }
 }
 
@@ -750,12 +843,16 @@ fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
         if variable.name().trim().is_empty() {
             errors.push(ValidationError::MissingVariableName);
         }
-        if let Variable::Query(variable) = variable
-            && variable.query.expression().trim().is_empty()
-        {
-            errors.push(ValidationError::MissingQueryExpression {
-                panel: format!("variable {}", variable.name),
-            });
+        match variable {
+            Variable::Query(variable) if variable.query.expression().trim().is_empty() => {
+                errors.push(ValidationError::MissingQueryExpression {
+                    panel: format!("variable {}", variable.name),
+                });
+            }
+            Variable::DataSource(_)
+            | Variable::Query(_)
+            | Variable::Custom(_)
+            | Variable::Constant(_) => {}
         }
     }
 

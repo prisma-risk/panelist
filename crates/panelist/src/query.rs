@@ -27,6 +27,24 @@ use serde_json::Value;
 
 use crate::DataSource;
 
+/// Datasource-query editor shown by Grafana.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryEditorMode {
+    /// Structured visual query builder.
+    Builder,
+    /// Raw query-language editor.
+    Code,
+}
+
+impl QueryEditorMode {
+    pub(crate) const fn as_grafana(self) -> &'static str {
+        match self {
+            Self::Builder => "builder",
+            Self::Code => "code",
+        }
+    }
+}
+
 /// Properties shared by datasource queries.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct QueryOptions {
@@ -37,6 +55,7 @@ pub struct QueryOptions {
     pub(crate) datasource: Option<DataSource>,
     pub(crate) hidden: bool,
     pub(crate) interval: Option<String>,
+    pub(crate) editor_mode: Option<QueryEditorMode>,
 }
 
 macro_rules! impl_query_builder {
@@ -91,6 +110,13 @@ macro_rules! impl_query_builder {
             #[must_use]
             pub fn interval(mut self, interval: impl Into<String>) -> Self {
                 self.options.interval = Some(interval.into());
+                self
+            }
+
+            /// Selects Grafana's visual builder or raw code editor.
+            #[must_use]
+            pub fn editor_mode(mut self, editor_mode: QueryEditorMode) -> Self {
+                self.options.editor_mode = Some(editor_mode);
                 self
             }
         }

@@ -153,6 +153,8 @@
   "templating": {
     "list": [
       {
+        "allValue": null,
+        "allowCustomValue": false,
         "current": {
           "selected": true,
           "text": "us-east-1",
@@ -175,6 +177,7 @@
           }
         ],
         "query": "us-east-1,us-west-2",
+        "skipUrlSync": false,
         "type": "custom"
       }
     ]

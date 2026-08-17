@@ -115,6 +115,33 @@ impl Color {
     }
 }
 
+/// Display text and optional color substituted for one exact field value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueMapping {
+    pub(crate) value: String,
+    pub(crate) text: String,
+    pub(crate) color: Option<Color>,
+}
+
+impl ValueMapping {
+    /// Maps an exact Grafana field value to display text.
+    #[must_use]
+    pub fn new(value: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            text: text.into(),
+            color: None,
+        }
+    }
+
+    /// Colors the mapped result.
+    #[must_use]
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+}
+
 /// How Grafana interprets threshold values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThresholdMode {
@@ -211,6 +238,7 @@ pub struct FieldConfig {
     pub(crate) display_name: Option<String>,
     pub(crate) color: Option<ColorScheme>,
     pub(crate) thresholds: Option<Thresholds>,
+    pub(crate) mappings: Vec<ValueMapping>,
     pub(crate) custom: BTreeMap<String, Value>,
     pub(crate) overrides: Vec<FieldOverride>,
 }
@@ -271,6 +299,13 @@ impl FieldConfig {
         self
     }
 
+    /// Adds an exact-value display mapping.
+    #[must_use]
+    pub fn mapping(mut self, mapping: ValueMapping) -> Self {
+        self.mappings.push(mapping);
+        self
+    }
+
     /// Adds a plugin-specific field default.
     #[must_use]
     pub fn custom(mut self, key: impl Into<String>, value: Value) -> Self {
@@ -316,6 +351,8 @@ pub enum OverrideProperty {
     Color(ColorScheme),
     /// Override line width for compatible panels.
     LineWidth(u8),
+    /// Override thresholds for the selected fields.
+    Thresholds(Thresholds),
     /// Explicit Grafana property escape hatch.
     Custom {
         /// Grafana field-property identifier.
@@ -377,6 +414,12 @@ impl FieldOverride {
     #[must_use]
     pub fn line_width(self, width: u8) -> Self {
         self.property(OverrideProperty::LineWidth(width))
+    }
+
+    /// Sets thresholds for the selected fields.
+    #[must_use]
+    pub fn thresholds(self, thresholds: Thresholds) -> Self {
+        self.property(OverrideProperty::Thresholds(thresholds))
     }
 }
 

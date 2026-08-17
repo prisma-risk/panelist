@@ -60,22 +60,28 @@ mod panel;
 mod query;
 mod validation;
 mod variable;
+mod visualization;
 
-pub use dashboard::{Dashboard, DashboardItem, DashboardLink, Row, TimeRange};
+pub use dashboard::{Dashboard, DashboardCursorSync, DashboardItem, DashboardLink, Row, TimeRange};
 pub use datasource::{DataSource, loki, prometheus};
 pub use field::{
     Color, ColorScheme, FieldConfig, FieldOverride, Legend, LegendCalculation, LegendMode,
     LegendPlacement, OverrideMatcher, OverrideProperty, ThresholdMode, ThresholdStep, Thresholds,
-    Unit,
+    Unit, ValueMapping,
 };
 pub use panel::{
     BarGauge, Gauge, GridPos, Heatmap, Panel, PanelBuilder, PanelKind, RawPanel, Stat, Table, Text,
     TextMode, Timeseries,
 };
-pub use query::{LokiQuery, PrometheusQuery, Query, QueryOptions, RawQuery};
+pub use query::{LokiQuery, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery};
 pub use validation::{Error, Result, ValidationError, ValidationErrors};
 pub use variable::{
-    ConstantVariable, CustomVariable, QueryVariable, Variable, VariableBuilder, VariableRefresh,
+    ConstantVariable, CustomVariable, DataSourceVariable, QueryVariable, Variable, VariableBuilder,
+    VariableRefresh, VariableSelection, VariableSort,
+};
+pub use visualization::{
+    BarGaugeDisplayMode, LineInterpolation, Orientation, PointVisibility, ReduceOptions, Stacking,
+    StackingMode, StatColorMode, StatGraphMode, Tooltip, TooltipMode, TooltipSort,
 };
 
 #[doc(hidden)]
@@ -86,11 +92,15 @@ pub mod __private {
 /// Common dashboard-authoring types, builders, helpers, and macros.
 pub mod prelude {
     pub use crate::{
-        BarGauge, Color, ColorScheme, ConstantVariable, CustomVariable, Dashboard, DashboardLink,
-        DataSource, FieldConfig, FieldOverride, Gauge, GridPos, Heatmap, Legend, LegendCalculation,
-        LegendMode, LegendPlacement, LokiQuery, OverrideMatcher, OverrideProperty, Panel,
-        PanelKind, PrometheusQuery, Query, QueryVariable, RawPanel, RawQuery, Row, Stat, Table,
-        Text, TextMode, ThresholdMode, Thresholds, TimeRange, Timeseries, Unit, Variable,
-        VariableRefresh, dashboard, loki, loki_query, prometheus, promql,
+        BarGauge, BarGaugeDisplayMode, Color, ColorScheme, ConstantVariable, CustomVariable,
+        Dashboard, DashboardCursorSync, DashboardLink, DataSource, DataSourceVariable, FieldConfig,
+        FieldOverride, Gauge, GridPos, Heatmap, Legend, LegendCalculation, LegendMode,
+        LegendPlacement, LineInterpolation, LokiQuery, Orientation, OverrideMatcher,
+        OverrideProperty, Panel, PanelKind, PointVisibility, PrometheusQuery, Query,
+        QueryEditorMode, QueryVariable, RawPanel, RawQuery, ReduceOptions, Row, Stacking,
+        StackingMode, Stat, StatColorMode, StatGraphMode, Table, Text, TextMode, ThresholdMode,
+        Thresholds, TimeRange, Timeseries, Tooltip, TooltipMode, TooltipSort, Unit, ValueMapping,
+        Variable, VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query,
+        prometheus, promql,
     };
 }
