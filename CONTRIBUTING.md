@@ -78,11 +78,11 @@ Releases run through [release-plz](https://release-plz.dev/):
 Do not edit `CHANGELOG.md` files by hand. The required changelog-ownership workflow permits only release PRs authored by `prismarisk-public-release[bot]` to change them.
 
 1. Land release-worthy changes on `main` with a `feat:`, `fix:`, `perf:`, or `refactor:` Conventional Commit prefix.
-2. Dispatch the `release-plz` workflow to open or update the release PR. It owns the workspace version and `crates/panelist/CHANGELOG.md` changes. Select the default `release-pr` command.
-3. Review and merge the release PR.
-4. Dispatch the workflow again with the `release` command. This creates a signed `vX.Y.Z` tag, publishes Panelist to crates.io, and creates the matching GitHub Release.
+2. Dispatch the `release-plz` workflow to open or update the release PR. It owns the workspace version and `crates/panelist/CHANGELOG.md` changes.
+3. Review and merge the release PR. Its merge automatically creates a signed `vX.Y.Z` tag, publishes Panelist to crates.io, and creates the matching GitHub Release.
+4. Verify the release workflow, crates.io publication, signed tag, and GitHub Release.
 
-Pushes to `main` never cut or publish a release; both release phases require a manual workflow dispatch.
+Release PR creation is manual. The publish phase runs automatically only when a push to `main` changes a release-plz-owned `CHANGELOG.md`; ordinary changes to `main` do not run it.
 
 Before changing publish metadata, run `make release-dry-run` to validate the crate archive exactly as crates.io will receive it. The publish job is the only job that receives `CARGO_REGISTRY_TOKEN`.
 
