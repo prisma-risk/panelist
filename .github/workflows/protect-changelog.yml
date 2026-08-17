@@ -1,0 +1,79 @@
+name: Protect release changelogs
+
+# This workflow is installed as a repository-ruleset workflow after merge, so
+# pull requests cannot weaken the guard that evaluates them.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changelog-owner:
+    name: release-plz owns CHANGELOG.md
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject contributor changelog changes
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pullRequest = context.payload.pull_request;
+            if (!pullRequest) {
+              core.setFailed('This guard must run from a pull_request event.');
+              return;
+            }
+
+            const releaseAuthor = {
+              id: 286791072,
+              login: 'prismarisk-public-release[bot]',
+            };
+            const author = pullRequest.user?.login ?? '<unknown>';
+            const trustedReleaseAuthor =
+              pullRequest.user?.id === releaseAuthor.id &&
+              pullRequest.user?.login === releaseAuthor.login &&
+              pullRequest.user?.type === 'Bot';
+            if (trustedReleaseAuthor) {
+              core.info(`Trusted release-plz PR author: ${author}`);
+              return;
+            }
+
+            const pullRequestQuery = {
+              ...context.repo,
+              pull_number: pullRequest.number,
+            };
+            const [{ data: currentPullRequest }, files] = await Promise.all([
+              github.rest.pulls.get(pullRequestQuery),
+              github.paginate(github.rest.pulls.listFiles, {
+                ...pullRequestQuery,
+                per_page: 100,
+              }),
+            ]);
+
+            const reportedCount = currentPullRequest.changed_files;
+            if (!Number.isInteger(reportedCount) || files.length < reportedCount) {
+              core.setFailed(
+                `GitHub reported ${reportedCount ?? 'an unknown number of'} changed files ` +
+                  `but returned only ${files.length}; refusing to approve an incomplete ` +
+                  `changelog check.`,
+              );
+              return;
+            }
+
+            const isChangelog = (path) =>
+              typeof path === 'string' && /(^|\/)CHANGELOG\.md$/.test(path);
+            const changelogs = files.flatMap((file) => {
+              const paths = [file.filename, file.previous_filename].filter(isChangelog);
+              return [...new Set(paths)];
+            });
+
+            if (changelogs.length === 0) {
+              core.info(`No CHANGELOG.md files changed by ${author}.`);
+              return;
+            }
+
+            core.setFailed(
+              `Only release-plz PRs authored by ${releaseAuthor.login} may update ` +
+                `CHANGELOG.md files. ${author} changed: ` +
+                `${[...new Set(changelogs)].sort().join(', ')}`,
+            );
