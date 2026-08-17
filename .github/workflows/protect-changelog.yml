@@ -1,9 +1,9 @@
 name: Protect release changelogs
 
-# This workflow is installed as a repository-ruleset workflow after merge, so
-# pull requests cannot weaken the guard that evaluates them.
+# Evaluate the trusted workflow from the base branch without checking out or
+# executing contributor code. The guard protects its own workflow path too.
 on:
-  pull_request:
+  pull_request_target:
 
 permissions:
   contents: read
@@ -24,20 +24,7 @@ jobs:
               return;
             }
 
-            const releaseAuthor = {
-              id: 286791072,
-              login: 'prismarisk-public-release[bot]',
-            };
             const author = pullRequest.user?.login ?? '<unknown>';
-            const trustedReleaseAuthor =
-              pullRequest.user?.id === releaseAuthor.id &&
-              pullRequest.user?.login === releaseAuthor.login &&
-              pullRequest.user?.type === 'Bot';
-            if (trustedReleaseAuthor) {
-              core.info(`Trusted release-plz PR author: ${author}`);
-              return;
-            }
-
             const pullRequestQuery = {
               ...context.repo,
               pull_number: pullRequest.number,
@@ -60,20 +47,47 @@ jobs:
               return;
             }
 
+            const guardPath = '.github/workflows/protect-changelog.yml';
             const isChangelog = (path) =>
               typeof path === 'string' && /(^|\/)CHANGELOG\.md$/.test(path);
-            const changelogs = files.flatMap((file) => {
-              const paths = [file.filename, file.previous_filename].filter(isChangelog);
+            const changedPaths = files.flatMap((file) => {
+              const paths = [file.filename, file.previous_filename].filter(
+                (path) => isChangelog(path) || path === guardPath,
+              );
               return [...new Set(paths)];
             });
+            const protectedPaths = [...new Set(changedPaths)].sort();
+
+            if (protectedPaths.includes(guardPath)) {
+              core.setFailed(
+                `${guardPath} is protected by this required check and cannot be changed ` +
+                  `by a pull request.`,
+              );
+              return;
+            }
+
+            const changelogs = protectedPaths.filter(isChangelog);
 
             if (changelogs.length === 0) {
               core.info(`No CHANGELOG.md files changed by ${author}.`);
               return;
             }
 
+            const releaseAuthor = {
+              id: 286791072,
+              login: 'prismarisk-public-release[bot]',
+            };
+            const trustedReleaseAuthor =
+              pullRequest.user?.id === releaseAuthor.id &&
+              pullRequest.user?.login === releaseAuthor.login &&
+              pullRequest.user?.type === 'Bot';
+            if (trustedReleaseAuthor) {
+              core.info(`Trusted release-plz PR author: ${author}`);
+              return;
+            }
+
             core.setFailed(
               `Only release-plz PRs authored by ${releaseAuthor.login} may update ` +
                 `CHANGELOG.md files. ${author} changed: ` +
-                `${[...new Set(changelogs)].sort().join(', ')}`,
+                `${changelogs.join(', ')}`,
             );
