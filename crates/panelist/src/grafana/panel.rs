@@ -82,6 +82,20 @@ pub(crate) fn normalize_row(row: &Row, id: u32, y: u16, panels: Vec<GrafanaPanel
     }
 }
 
+/// Lowers an authored [`crate::Panel`] into wire JSON.
+///
+/// `options` is assembled in three ordered layers, each free to overwrite a
+/// key the previous layer set:
+///
+/// 1. Kind defaults (`default_panel_options`) — the JSON Grafana expects
+///    for this panel kind when no typed setter has been called.
+/// 2. Typed options (`typed_panel_options`) — values set through the
+///    kind-specific builder methods, e.g. `PanelBuilder::color_mode`.
+/// 3. Raw options (`panel.raw_options`) — the `.option()` escape hatch,
+///    applied last so it always wins regardless of call order.
+///
+/// `fieldConfig.defaults.custom` follows the same three-tier ordering
+/// through `super::field::normalize_field_config`.
 pub(crate) fn normalize_panel(
     panel: &Panel,
     id: u32,
@@ -120,7 +134,11 @@ pub(crate) fn default_panel_options(panel: &Panel) -> BTreeMap<String, Value> {
     let mut options = BTreeMap::new();
     match &panel.kind {
         PanelKind::Timeseries => {
-            options.insert("legend".to_owned(), legend_value(panel.legend.as_ref()));
+            // Unconditional: the typed `legend` override below only replaces
+            // this when a legend has actually been authored, so a panel
+            // that never calls `.legend_options()` must still serialize the
+            // same default legend object it always has.
+            options.insert("legend".to_owned(), legend_value(None));
             options.insert(
                 "tooltip".to_owned(),
                 json!({"mode": "single", "sort": "none", "hideZeros": false}),
@@ -230,6 +248,9 @@ pub(crate) fn typed_panel_options(options: &PanelOptions) -> BTreeMap<String, Va
         PanelOptions::Timeseries(timeseries) => {
             if let Some(tooltip) = timeseries.tooltip {
                 output.insert("tooltip".to_owned(), tooltip_value(tooltip));
+            }
+            if let Some(legend) = &timeseries.legend {
+                output.insert("legend".to_owned(), legend_value(Some(legend)));
             }
         }
     }

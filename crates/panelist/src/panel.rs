@@ -105,7 +105,6 @@ pub struct Panel {
     pub(crate) datasource: Option<DataSource>,
     pub(crate) queries: Vec<Query>,
     pub(crate) field_config: FieldConfig,
-    pub(crate) legend: Option<Legend>,
     pub(crate) text: Option<(TextMode, String)>,
     pub(crate) links: Vec<DashboardLink>,
     pub(crate) transparent: bool,
@@ -127,7 +126,6 @@ impl Panel {
             datasource: None,
             queries: Vec::new(),
             field_config: FieldConfig::default(),
-            legend: None,
             text: None,
             links: Vec::new(),
             transparent: false,
@@ -439,13 +437,6 @@ impl<K: PanelType> PanelBuilder<K> {
         self
     }
 
-    /// Sets visualization legend options.
-    #[must_use]
-    pub fn legend_options(mut self, legend: Legend) -> Self {
-        self.panel.legend = Some(legend);
-        self
-    }
-
     /// Adds a field override.
     #[must_use]
     pub fn override_field(mut self, field_override: FieldOverride) -> Self {
@@ -468,6 +459,9 @@ impl<K: PanelType> PanelBuilder<K> {
     }
 
     /// Adds a plugin-specific value under the panel's `options` object.
+    ///
+    /// This escape hatch is applied after every typed option setter, so it
+    /// wins over the equivalent typed value even if called before it.
     #[must_use]
     pub fn option(mut self, key: impl Into<String>, value: Value) -> Self {
         self.panel.raw_options.insert(key.into(), value);
@@ -475,6 +469,10 @@ impl<K: PanelType> PanelBuilder<K> {
     }
 
     /// Adds an unsupported top-level Grafana panel property.
+    ///
+    /// Extras are flattened directly onto the serialized panel object,
+    /// outside `options` and `fieldConfig`, so no typed setter can shadow
+    /// them.
     #[must_use]
     pub fn extra(mut self, key: impl Into<String>, value: Value) -> Self {
         self.panel.extra.insert(key.into(), value);
@@ -623,6 +621,18 @@ impl PanelBuilder<TimeseriesKind> {
         self.panel.kind_options.timeseries().tooltip = Some(tooltip);
         self
     }
+
+    /// Sets visualization legend options.
+    ///
+    /// Only time-series panels read the `legend` key in Grafana; this
+    /// method is available only on [`PanelBuilder<TimeseriesKind>`] so a
+    /// call that would otherwise silently do nothing on another panel kind
+    /// is a compile error instead.
+    #[must_use]
+    pub fn legend_options(mut self, legend: Legend) -> Self {
+        self.panel.kind_options.timeseries().legend = Some(legend);
+        self
+    }
 }
 
 impl PanelBuilder<BarGaugeKind> {
@@ -742,6 +752,9 @@ impl RawPanel {
     }
 
     /// Adds a plugin option.
+    ///
+    /// `RawPanel` has no kind-specific typed setters, so this is the only
+    /// way to populate a plugin's `options` object.
     #[must_use]
     pub fn option(mut self, key: impl Into<String>, value: Value) -> Self {
         self.panel.raw_options.insert(key.into(), value);

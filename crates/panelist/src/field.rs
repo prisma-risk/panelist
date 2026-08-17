@@ -282,6 +282,10 @@ impl FieldConfig {
     }
 
     /// Adds a plugin-specific field default.
+    ///
+    /// This escape hatch is applied after every typed field-custom setter
+    /// (e.g. `PanelBuilder::line_width`), so it wins over the equivalent
+    /// typed value regardless of call order.
     #[must_use]
     pub fn custom(mut self, key: impl Into<String>, value: Value) -> Self {
         self.custom.insert(key.into(), value);

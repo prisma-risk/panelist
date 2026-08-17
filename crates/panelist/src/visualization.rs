@@ -21,6 +21,8 @@
 //  limitations under the License.
 //
 
+use crate::Legend;
+
 /// A Grafana reduction applied to a field's values.
 ///
 /// Grafana calls this vocabulary `ReducerID`. It is used by table legends,
@@ -285,6 +287,7 @@ pub(crate) struct TimeseriesOptions {
     pub(crate) span_nulls: Option<bool>,
     pub(crate) stacking: Option<Stacking>,
     pub(crate) tooltip: Option<Tooltip>,
+    pub(crate) legend: Option<Legend>,
 }
 
 /// Typed authoring state for the Grafana bar-gauge panel.
