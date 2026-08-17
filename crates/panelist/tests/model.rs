@@ -468,3 +468,90 @@ fn gauge_lowers_orientation_and_reduce_options() {
         json!(["max"])
     );
 }
+
+// The serializer emits panel options in tiers: a kind default, then a typed
+// override, then the raw `.option()` escape hatch. Kind defaults and typed
+// defaults are independent literals (`BTreeMap::extend` replaces whole
+// values), so nothing stops them from drifting apart. These tests pin that
+// the *default* typed value reproduces exactly the kind default it shadows,
+// for every panel kind and key where that duplication exists today.
+
+#[test]
+fn stat_reduce_options_default_matches_kind_default() {
+    let without = as_value(
+        &Dashboard::new("Reduce default")
+            .panel(Stat::new("Value").query(PrometheusQuery::new("up"))),
+    );
+    let with = as_value(
+        &Dashboard::new("Reduce default").panel(
+            Stat::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .reduce_options(ReduceOptions::new()),
+        ),
+    );
+
+    assert_eq!(
+        with["panels"][0]["options"]["reduceOptions"],
+        without["panels"][0]["options"]["reduceOptions"]
+    );
+}
+
+#[test]
+fn gauge_reduce_options_default_matches_kind_default() {
+    let without = as_value(
+        &Dashboard::new("Reduce default")
+            .panel(Gauge::new("Value").query(PrometheusQuery::new("up"))),
+    );
+    let with = as_value(
+        &Dashboard::new("Reduce default").panel(
+            Gauge::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .reduce_options(ReduceOptions::new()),
+        ),
+    );
+
+    assert_eq!(
+        with["panels"][0]["options"]["reduceOptions"],
+        without["panels"][0]["options"]["reduceOptions"]
+    );
+}
+
+#[test]
+fn bar_gauge_reduce_options_default_matches_kind_default() {
+    let without = as_value(
+        &Dashboard::new("Reduce default")
+            .panel(BarGauge::new("Value").query(PrometheusQuery::new("up"))),
+    );
+    let with = as_value(
+        &Dashboard::new("Reduce default").panel(
+            BarGauge::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .reduce_options(ReduceOptions::new()),
+        ),
+    );
+
+    assert_eq!(
+        with["panels"][0]["options"]["reduceOptions"],
+        without["panels"][0]["options"]["reduceOptions"]
+    );
+}
+
+#[test]
+fn timeseries_tooltip_default_matches_kind_default() {
+    let without = as_value(
+        &Dashboard::new("Tooltip default")
+            .panel(Timeseries::new("Value").query(PrometheusQuery::new("up"))),
+    );
+    let with = as_value(
+        &Dashboard::new("Tooltip default").panel(
+            Timeseries::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .tooltip(Tooltip::new()),
+        ),
+    );
+
+    assert_eq!(
+        with["panels"][0]["options"]["tooltip"],
+        without["panels"][0]["options"]["tooltip"]
+    );
+}
