@@ -24,8 +24,11 @@
 use std::collections::HashSet;
 
 use crate::{
-    Dashboard, DashboardItem, Panel, Thresholds, ValidationError, ValidationErrors, Variable,
+    Dashboard, DashboardItem, Panel, Thresholds, Transformation, TransformationFilter,
+    ValidationError, ValidationErrors, Variable,
 };
+
+use super::query::effective_ref_ids;
 
 pub(crate) fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
     let mut errors = Vec::new();
@@ -132,6 +135,65 @@ pub(crate) fn validate_panel(
         errors.push(ValidationError::InvalidThresholds {
             panel: panel.title.clone(),
         });
+    }
+
+    let ref_ids: HashSet<String> = effective_ref_ids(&panel.queries).into_iter().collect();
+    for transformation in &panel.transformations {
+        validate_transformation(panel, transformation, &ref_ids, errors);
+    }
+}
+
+fn validate_transformation(
+    panel: &Panel,
+    transformation: &Transformation,
+    ref_ids: &HashSet<String>,
+    errors: &mut Vec<ValidationError>,
+) {
+    let mut referenced: Vec<&str> = Vec::new();
+    if let Some(TransformationFilter::RefId(ref_id)) = &transformation.envelope().filter {
+        referenced.push(ref_id);
+    }
+
+    match transformation {
+        Transformation::JoinByField(join) if join.field.trim().is_empty() => {
+            errors.push(ValidationError::MissingTransformationField {
+                panel: panel.title.clone(),
+                transformation: "join by field",
+            });
+        }
+        Transformation::SortBy(sort)
+            if sort
+                .fields
+                .iter()
+                .any(|field| field.field.trim().is_empty()) =>
+        {
+            errors.push(ValidationError::MissingTransformationField {
+                panel: panel.title.clone(),
+                transformation: "sort by",
+            });
+        }
+        Transformation::Raw(raw) if raw.id.trim().is_empty() => {
+            errors.push(ValidationError::MissingTransformationId {
+                panel: panel.title.clone(),
+            });
+        }
+        Transformation::TimeSeriesToTable(convert) => {
+            referenced.extend(convert.queries.keys().map(String::as_str));
+        }
+        Transformation::JoinByField(_)
+        | Transformation::SortBy(_)
+        | Transformation::OrganizeFields(_)
+        | Transformation::LabelsToFields(_)
+        | Transformation::Raw(_) => {}
+    }
+
+    for ref_id in referenced {
+        if !ref_ids.contains(ref_id) {
+            errors.push(ValidationError::UnknownTransformationRefId {
+                panel: panel.title.clone(),
+                ref_id: ref_id.to_owned(),
+            });
+        }
     }
 }
 

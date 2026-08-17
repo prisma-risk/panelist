@@ -150,4 +150,26 @@ pub enum ValidationError {
         /// Panel title.
         panel: String,
     },
+    /// A transformation references a query reference ID the panel does not have.
+    #[error("panel \"{panel}\": transformation references unknown query reference ID \"{ref_id}\"")]
+    UnknownTransformationRefId {
+        /// Panel title.
+        panel: String,
+        /// Unresolved query reference.
+        ref_id: String,
+    },
+    /// A transformation is missing a required field name.
+    #[error("panel \"{panel}\": {transformation} transformation requires a field name")]
+    MissingTransformationField {
+        /// Panel title.
+        panel: String,
+        /// Transformation name.
+        transformation: &'static str,
+    },
+    /// A raw transformation has no Grafana transformation ID.
+    #[error("panel \"{panel}\": raw transformation ID must not be empty")]
+    MissingTransformationId {
+        /// Panel title.
+        panel: String,
+    },
 }

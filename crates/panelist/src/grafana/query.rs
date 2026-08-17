@@ -28,10 +28,8 @@ use crate::{DataSource, Query};
 use super::layout::reference_id;
 use super::wire::GrafanaTarget;
 
-pub(crate) fn normalize_targets(
-    queries: &[Query],
-    panel_datasource: Option<&DataSource>,
-) -> Vec<GrafanaTarget> {
+/// Returns the reference ID each query resolves to, explicit or assigned.
+pub(crate) fn effective_ref_ids(queries: &[Query]) -> Vec<String> {
     let mut used: HashSet<String> = queries
         .iter()
         .filter_map(|query| query.options().ref_id.clone())
@@ -41,8 +39,7 @@ pub(crate) fn normalize_targets(
     queries
         .iter()
         .map(|query| {
-            let options = query.options();
-            let ref_id = options.ref_id.clone().unwrap_or_else(|| {
+            query.options().ref_id.clone().unwrap_or_else(|| {
                 loop {
                     let candidate = reference_id(next);
                     next += 1;
@@ -50,7 +47,22 @@ pub(crate) fn normalize_targets(
                         break candidate;
                     }
                 }
-            });
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn normalize_targets(
+    queries: &[Query],
+    panel_datasource: Option<&DataSource>,
+) -> Vec<GrafanaTarget> {
+    let ref_ids = effective_ref_ids(queries);
+
+    queries
+        .iter()
+        .zip(ref_ids)
+        .map(|(query, ref_id)| {
+            let options = query.options();
             let query_type = match query {
                 Query::Loki(_) => Some(if options.instant { "instant" } else { "range" }),
                 Query::Prometheus(_) | Query::Raw(_) => None,

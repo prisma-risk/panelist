@@ -21,7 +21,7 @@
 //  limitations under the License.
 //
 
-use panelist::prelude::*;
+use panelist::{ValidationError, prelude::*};
 use serde_json::{Value, json};
 
 fn as_value(dashboard: &Dashboard) -> Value {
@@ -631,4 +631,63 @@ fn join_modes_and_labels_to_fields_serialize() {
         transformations[2],
         json!({"id": "myPlugin", "options": {"depth": 3}})
     );
+}
+
+#[test]
+fn transformation_filters_target_one_query() {
+    let dashboard = Dashboard::new("Filtered").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .query(PrometheusQuery::new("rate(x[5m])").ref_id("D"))
+            .transform(TimeSeriesToTable::new().query("D").only_ref_id("D"))
+            .transform(SortBy::desc("p95").disabled(true)),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(
+        transformations[0]["filter"],
+        json!({"id": "byRefId", "options": "D"})
+    );
+    assert_eq!(transformations[1]["disabled"], true);
+    assert!(transformations[1].get("filter").is_none());
+}
+
+#[test]
+fn unknown_transformation_ref_ids_are_rejected() {
+    let dashboard = Dashboard::new("Bad ref").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(TimeSeriesToTable::new().query("Z")),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::UnknownTransformationRefId { ref_id, .. }] if ref_id == "Z"
+    ));
+}
+
+#[test]
+fn auto_assigned_ref_ids_satisfy_transformation_validation() {
+    let dashboard = Dashboard::new("Auto ref").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .query(PrometheusQuery::new("rate(x[5m])"))
+            .transform(TimeSeriesToTable::new().query("B")),
+    );
+
+    dashboard.validate().unwrap();
+}
+
+#[test]
+fn empty_transformation_fields_are_rejected() {
+    let dashboard = Dashboard::new("Empty").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(JoinByField::new("  "))
+            .transform(RawTransformation::new("")),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert_eq!(errors.errors().len(), 2);
 }

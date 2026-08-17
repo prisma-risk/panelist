@@ -77,7 +77,7 @@ pub use panel::{
 pub use query::{LokiQuery, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery};
 pub use transformation::{
     JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, OrganizeFields, RawTransformation,
-    SortBy, TimeSeriesToTable, Transformation,
+    SortBy, TimeSeriesToTable, Transformation, TransformationFilter,
 };
 pub use validation::{Error, Result, ValidationError, ValidationErrors};
 pub use variable::{
@@ -107,7 +107,7 @@ pub mod prelude {
         RawQuery, RawTransformation, ReduceOptions, Reducer, Row, SortBy, SortDirection, Stacking,
         StackingMode, Stat, StatColorMode, StatGraphMode, Table, Text, TextMode, ThresholdMode,
         Thresholds, TimeRange, TimeSeriesToTable, Timeseries, Tooltip, TooltipMode, TooltipSort,
-        Transformation, Unit, ValueMapping, Variable, VariableRefresh, VariableSelection,
-        VariableSort, dashboard, loki, loki_query, prometheus, promql,
+        Transformation, TransformationFilter, Unit, ValueMapping, Variable, VariableRefresh,
+        VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus, promql,
     };
 }

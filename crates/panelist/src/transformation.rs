@@ -27,6 +27,32 @@ use serde_json::Value;
 
 use crate::{Reducer, SortDirection};
 
+/// Restricts a transformation to a subset of a panel's query results.
+///
+/// Grafana calls these "frame matchers", a vocabulary distinct from the
+/// field matchers used by field overrides: a transformation filter spells
+/// "which query" as `byRefId`, while a field override spells the same idea
+/// as `byFrameRefID`. They are different strings for the same concept —
+/// keep them apart rather than reusing one for the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TransformationFilter {
+    /// Matches the data frame produced by one query reference ID.
+    RefId(String),
+    /// Matches a data frame by its name.
+    FrameName(String),
+    /// Matches a data frame by its position among the panel's results.
+    FrameIndex(usize),
+}
+
+/// Shared per-transformation state: which query results it applies to, and
+/// whether it is retained but temporarily disabled.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct TransformationEnvelope {
+    pub(crate) filter: Option<TransformationFilter>,
+    pub(crate) disabled: bool,
+}
+
 /// How Grafana joins multiple query results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JoinMode {
@@ -44,6 +70,7 @@ pub enum JoinMode {
 pub struct JoinByField {
     pub(crate) field: String,
     pub(crate) mode: JoinMode,
+    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl JoinByField {
@@ -53,6 +80,7 @@ impl JoinByField {
         Self {
             field: field.into(),
             mode: JoinMode::Outer,
+            envelope: TransformationEnvelope::default(),
         }
     }
 
@@ -82,6 +110,7 @@ pub struct OrganizeFields {
     pub(crate) renames: BTreeMap<String, String>,
     pub(crate) hidden: BTreeSet<String>,
     pub(crate) order: Vec<String>,
+    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl OrganizeFields {
@@ -125,6 +154,7 @@ pub(crate) struct SortByField {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SortBy {
     pub(crate) fields: Vec<SortByField>,
+    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl SortBy {
@@ -136,6 +166,7 @@ impl SortBy {
                 field: field.into(),
                 descending: direction.is_descending(),
             }],
+            envelope: TransformationEnvelope::default(),
         }
     }
 
@@ -173,6 +204,7 @@ pub(crate) struct TimeSeriesToTableQuery {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TimeSeriesToTable {
     pub(crate) queries: BTreeMap<String, TimeSeriesToTableQuery>,
+    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl TimeSeriesToTable {
@@ -220,6 +252,7 @@ pub struct LabelsToFields {
     pub(crate) mode: LabelsToFieldsMode,
     pub(crate) keep: Vec<String>,
     pub(crate) value_label: Option<String>,
+    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl LabelsToFields {
@@ -256,6 +289,7 @@ impl LabelsToFields {
 pub struct RawTransformation {
     pub(crate) id: String,
     pub(crate) options: BTreeMap<String, Value>,
+    pub(crate) envelope: TransformationEnvelope,
 }
 
 impl RawTransformation {
@@ -265,6 +299,7 @@ impl RawTransformation {
         Self {
             id: id.into(),
             options: BTreeMap::new(),
+            envelope: TransformationEnvelope::default(),
         }
     }
 
@@ -275,6 +310,51 @@ impl RawTransformation {
         self
     }
 }
+
+macro_rules! impl_transformation_builder {
+    ($($type:ty),+ $(,)?) => {
+        $(
+            impl $type {
+                /// Applies this transformation only to one query reference ID.
+                #[must_use]
+                pub fn only_ref_id(mut self, ref_id: impl Into<String>) -> Self {
+                    self.envelope.filter = Some(TransformationFilter::RefId(ref_id.into()));
+                    self
+                }
+
+                /// Applies this transformation only to one named data frame.
+                #[must_use]
+                pub fn only_frame_name(mut self, name: impl Into<String>) -> Self {
+                    self.envelope.filter = Some(TransformationFilter::FrameName(name.into()));
+                    self
+                }
+
+                /// Applies this transformation only to one data frame position.
+                #[must_use]
+                pub fn only_frame_index(mut self, index: usize) -> Self {
+                    self.envelope.filter = Some(TransformationFilter::FrameIndex(index));
+                    self
+                }
+
+                /// Retains the transformation in the dashboard without applying it.
+                #[must_use]
+                pub fn disabled(mut self, disabled: bool) -> Self {
+                    self.envelope.disabled = disabled;
+                    self
+                }
+            }
+        )+
+    };
+}
+
+impl_transformation_builder!(
+    JoinByField,
+    OrganizeFields,
+    SortBy,
+    TimeSeriesToTable,
+    LabelsToFields,
+    RawTransformation,
+);
 
 /// A panel transformation applied to query results before rendering.
 #[derive(Debug, Clone, PartialEq)]
@@ -292,6 +372,20 @@ pub enum Transformation {
     LabelsToFields(LabelsToFields),
     /// An unmodeled Grafana transformation.
     Raw(RawTransformation),
+}
+
+impl Transformation {
+    /// Returns this transformation's shared filter/disabled state.
+    pub(crate) fn envelope(&self) -> &TransformationEnvelope {
+        match self {
+            Self::JoinByField(join) => &join.envelope,
+            Self::OrganizeFields(organize) => &organize.envelope,
+            Self::SortBy(sort) => &sort.envelope,
+            Self::TimeSeriesToTable(convert) => &convert.envelope,
+            Self::LabelsToFields(labels) => &labels.envelope,
+            Self::Raw(raw) => &raw.envelope,
+        }
+    }
 }
 
 impl From<JoinByField> for Transformation {

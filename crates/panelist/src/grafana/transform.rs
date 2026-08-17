@@ -29,7 +29,7 @@
 
 use serde_json::{Value, json};
 
-use crate::{JoinMode, LabelsToFieldsMode, Transformation};
+use crate::{JoinMode, LabelsToFieldsMode, Transformation, TransformationFilter};
 
 pub(crate) fn normalize_transformation(transformation: &Transformation) -> Value {
     let (id, options) = match transformation {
@@ -117,6 +117,15 @@ pub(crate) fn normalize_transformation(transformation: &Transformation) -> Value
     let mut output = serde_json::Map::new();
     output.insert("id".to_owned(), json!(id));
     output.insert("options".to_owned(), options);
+
+    let envelope = transformation.envelope();
+    if let Some(filter) = &envelope.filter {
+        output.insert("filter".to_owned(), transformation_filter(filter));
+    }
+    if envelope.disabled {
+        output.insert("disabled".to_owned(), json!(true));
+    }
+
     Value::Object(output)
 }
 
@@ -132,5 +141,15 @@ const fn labels_to_fields_mode(mode: LabelsToFieldsMode) -> &'static str {
     match mode {
         LabelsToFieldsMode::Columns => "columns",
         LabelsToFieldsMode::Rows => "rows",
+    }
+}
+
+// Frame matchers use `byRefId`, distinct from the `byFrameRefID` field
+// matcher that field overrides use for the same concept.
+fn transformation_filter(filter: &TransformationFilter) -> Value {
+    match filter {
+        TransformationFilter::RefId(ref_id) => json!({"id": "byRefId", "options": ref_id}),
+        TransformationFilter::FrameName(name) => json!({"id": "byName", "options": name}),
+        TransformationFilter::FrameIndex(index) => json!({"id": "byIndex", "options": index}),
     }
 }
