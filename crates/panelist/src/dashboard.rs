@@ -31,6 +31,28 @@ use crate::{DataSource, Error, Panel, Result, Variable, grafana, validation::Val
 /// The default Classic dashboard schema emitted by Panelist.
 pub const DEFAULT_SCHEMA_VERSION: u32 = 41;
 
+/// How panel cursors and tooltips are synchronized across a dashboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DashboardCursorSync {
+    /// Do not synchronize panel cursors or tooltips.
+    #[default]
+    Off,
+    /// Share a crosshair between compatible panels.
+    Crosshair,
+    /// Share tooltips between compatible panels.
+    Tooltip,
+}
+
+impl DashboardCursorSync {
+    pub(crate) const fn as_grafana(self) -> u8 {
+        match self {
+            Self::Off => 0,
+            Self::Crosshair => 1,
+            Self::Tooltip => 2,
+        }
+    }
+}
+
 /// A Grafana dashboard time range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimeRange {
@@ -183,7 +205,9 @@ pub struct Dashboard {
     pub(crate) time: TimeRange,
     pub(crate) timezone: String,
     pub(crate) editable: bool,
+    pub(crate) cursor_sync: DashboardCursorSync,
     pub(crate) schema_version: u32,
+    pub(crate) version: u32,
     pub(crate) datasource: Option<DataSource>,
     pub(crate) variables: Vec<Variable>,
     pub(crate) links: Vec<DashboardLink>,
@@ -204,7 +228,9 @@ impl Dashboard {
             time: TimeRange::default(),
             timezone: "browser".to_owned(),
             editable: true,
+            cursor_sync: DashboardCursorSync::Off,
             schema_version: DEFAULT_SCHEMA_VERSION,
+            version: 0,
             datasource: None,
             variables: Vec::new(),
             links: Vec::new(),
@@ -262,10 +288,27 @@ impl Dashboard {
         self
     }
 
+    /// Controls crosshair or tooltip synchronization between panels.
+    #[must_use]
+    pub fn cursor_sync(mut self, cursor_sync: DashboardCursorSync) -> Self {
+        self.cursor_sync = cursor_sync;
+        self
+    }
+
     /// Overrides the emitted Classic dashboard schema version.
     #[must_use]
     pub fn schema_version(mut self, schema_version: u32) -> Self {
         self.schema_version = schema_version;
+        self
+    }
+
+    /// Sets the persisted Grafana dashboard revision.
+    ///
+    /// File-provisioned dashboards commonly use a stable revision such as
+    /// `1`, while newly authored dashboards default to `0`.
+    #[must_use]
+    pub fn version(mut self, version: u32) -> Self {
+        self.version = version;
         self
     }
 

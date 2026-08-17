@@ -207,6 +207,127 @@ fn serializes_query_custom_and_constant_variables() {
 }
 
 #[test]
+fn serializes_datasource_and_complete_variable_state() {
+    let dashboard = Dashboard::new("Variable state")
+        .variable(
+            DataSourceVariable::new("datasource", "prometheus")
+                .label("Prometheus")
+                .current(VariableSelection::new("Primary", "prometheus-main"))
+                .regex("/^prometheus/")
+                .refresh(VariableRefresh::OnDashboardLoad),
+        )
+        .variable(
+            QueryVariable::new(
+                "namespace",
+                PrometheusQuery::new("label_values(kube_namespace_labels, namespace)")
+                    .ref_id("NamespaceVariable"),
+            )
+            .datasource(prometheus("$datasource"))
+            .current(VariableSelection::new("All", "$__all"))
+            .include_all(true)
+            .all_value(".*")
+            .multi(true)
+            .regex("/^(prod|staging)$/")
+            .sort(VariableSort::AlphabeticalCaseInsensitiveAscending)
+            .refresh(VariableRefresh::OnTimeRangeChange),
+        );
+    let value = as_value(&dashboard);
+    let variables = value["templating"]["list"].as_array().unwrap();
+
+    assert_eq!(variables[0]["type"], "datasource");
+    assert_eq!(variables[0]["query"], "prometheus");
+    assert_eq!(variables[0]["current"]["text"], "Primary");
+    assert_eq!(variables[1]["query"]["refId"], "NamespaceVariable");
+    assert_eq!(variables[1]["current"]["value"], "$__all");
+    assert_eq!(variables[1]["allValue"], ".*");
+    assert_eq!(variables[1]["refresh"], 2);
+    assert_eq!(variables[1]["sort"], 5);
+}
+
+#[test]
+fn serializes_value_mappings_and_threshold_overrides() {
+    let panel = Stat::new("Health")
+        .mapping(ValueMapping::new("0", "Unhealthy").color(Color::Red))
+        .mapping(ValueMapping::new("1", "Healthy").color(Color::Green))
+        .override_field(
+            FieldOverride::by_name("availability")
+                .thresholds(Thresholds::new().step(Color::Red, None).green(1.0)),
+        );
+    let value = as_value(&Dashboard::new("Mappings").panel(panel));
+    let panel = &value["panels"][0];
+
+    assert_eq!(
+        panel["fieldConfig"]["defaults"]["mappings"][0]["options"]["0"]["text"],
+        "Unhealthy"
+    );
+    assert_eq!(
+        panel["fieldConfig"]["defaults"]["mappings"][0]["options"]["1"]["color"],
+        "green"
+    );
+    assert_eq!(
+        panel["fieldConfig"]["overrides"][0]["properties"][0]["id"],
+        "thresholds"
+    );
+}
+
+#[test]
+fn serializes_typed_visualization_options_and_dashboard_metadata() {
+    let dashboard = Dashboard::new("Typed options")
+        .schema_version(39)
+        .version(7)
+        .cursor_sync(DashboardCursorSync::Crosshair)
+        .panel(
+            Stat::new("Status")
+                .color_mode(StatColorMode::Background)
+                .graph_mode(StatGraphMode::None)
+                .orientation(Orientation::Horizontal)
+                .wide_layout(true),
+        )
+        .panel(
+            Timeseries::new("Traffic")
+                .query(
+                    PrometheusQuery::new("rate(requests_total[5m])")
+                        .editor_mode(QueryEditorMode::Code),
+                )
+                .fill_opacity(10.0)
+                .line_width(2.0)
+                .point_size(3.0)
+                .line_interpolation(LineInterpolation::StepAfter)
+                .show_points(PointVisibility::Never)
+                .span_nulls(true)
+                .stacking(Stacking::new(StackingMode::Normal).group("requests"))
+                .tooltip(
+                    Tooltip::new()
+                        .mode(TooltipMode::Multi)
+                        .sort(TooltipSort::Descending),
+                ),
+        )
+        .panel(
+            BarGauge::new("Pods")
+                .display_mode(BarGaugeDisplayMode::Lcd)
+                .orientation(Orientation::Vertical)
+                .reduce_options(ReduceOptions::new().values(true)),
+        );
+    let value = as_value(&dashboard);
+
+    assert_eq!(value["schemaVersion"], 39);
+    assert_eq!(value["version"], 7);
+    assert_eq!(value["graphTooltip"], 1);
+    assert_eq!(value["panels"][0]["options"]["colorMode"], "background");
+    assert_eq!(
+        value["panels"][1]["fieldConfig"]["defaults"]["custom"]["lineInterpolation"],
+        "stepAfter"
+    );
+    assert_eq!(value["panels"][1]["options"]["tooltip"]["mode"], "multi");
+    assert_eq!(value["panels"][1]["targets"][0]["editorMode"], "code");
+    assert_eq!(value["panels"][2]["options"]["displayMode"], "lcd");
+    assert_eq!(
+        value["panels"][2]["options"]["reduceOptions"]["values"],
+        true
+    );
+}
+
+#[test]
 fn rejects_invalid_dimensions_duplicate_ids_refs_and_thresholds() {
     let dashboard = Dashboard::new("Invalid")
         .panel(

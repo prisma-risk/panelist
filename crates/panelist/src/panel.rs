@@ -23,11 +23,12 @@
 
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{
-    ColorScheme, DashboardLink, DataSource, FieldConfig, FieldOverride, Legend, Query, Thresholds,
-    Unit,
+    BarGaugeDisplayMode, ColorScheme, DashboardLink, DataSource, FieldConfig, FieldOverride,
+    Legend, LineInterpolation, Orientation, PointVisibility, Query, ReduceOptions, Stacking,
+    StatColorMode, StatGraphMode, Thresholds, Tooltip, Unit, ValueMapping,
 };
 
 /// An explicit position in Grafana's 24-column dashboard grid.
@@ -410,6 +411,13 @@ impl<K: PanelType> PanelBuilder<K> {
         self
     }
 
+    /// Adds an exact-value display mapping.
+    #[must_use]
+    pub fn mapping(mut self, mapping: ValueMapping) -> Self {
+        self.panel.field_config.mappings.push(mapping);
+        self
+    }
+
     /// Sets visualization legend options.
     #[must_use]
     pub fn legend_options(mut self, legend: Legend) -> Self {
@@ -481,6 +489,183 @@ impl PanelBuilder<TextKind> {
             .take()
             .map_or_else(String::new, |(_, content)| content);
         self.panel.text = Some((mode, content));
+        self
+    }
+}
+
+impl PanelBuilder<StatKind> {
+    /// Sets whether Grafana colors the value, background, or neither.
+    #[must_use]
+    pub fn color_mode(mut self, mode: StatColorMode) -> Self {
+        self.panel
+            .options
+            .insert("colorMode".to_owned(), json!(mode.as_grafana()));
+        self
+    }
+
+    /// Sets area-sparkline or no-sparkline rendering.
+    #[must_use]
+    pub fn graph_mode(mut self, mode: StatGraphMode) -> Self {
+        self.panel
+            .options
+            .insert("graphMode".to_owned(), json!(mode.as_grafana()));
+        self
+    }
+
+    /// Sets the value orientation.
+    #[must_use]
+    pub fn orientation(mut self, orientation: Orientation) -> Self {
+        self.panel
+            .options
+            .insert("orientation".to_owned(), json!(orientation.as_grafana()));
+        self
+    }
+
+    /// Controls Grafana's wide-layout treatment for value names and values.
+    #[must_use]
+    pub fn wide_layout(mut self, wide_layout: bool) -> Self {
+        self.panel
+            .options
+            .insert("wideLayout".to_owned(), json!(wide_layout));
+        self
+    }
+
+    /// Sets how fields are reduced to displayed values.
+    #[must_use]
+    pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
+        self.panel
+            .options
+            .insert("reduceOptions".to_owned(), options.as_grafana());
+        self
+    }
+}
+
+impl PanelBuilder<GaugeKind> {
+    /// Sets the value orientation.
+    #[must_use]
+    pub fn orientation(mut self, orientation: Orientation) -> Self {
+        self.panel
+            .options
+            .insert("orientation".to_owned(), json!(orientation.as_grafana()));
+        self
+    }
+
+    /// Sets how fields are reduced to displayed values.
+    #[must_use]
+    pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
+        self.panel
+            .options
+            .insert("reduceOptions".to_owned(), options.as_grafana());
+        self
+    }
+}
+
+impl PanelBuilder<TimeseriesKind> {
+    /// Sets the area fill opacity from 0 to 100.
+    #[must_use]
+    pub fn fill_opacity(mut self, opacity: f64) -> Self {
+        self.panel
+            .field_config
+            .custom
+            .insert("fillOpacity".to_owned(), json!(opacity));
+        self
+    }
+
+    /// Sets the line width in pixels.
+    #[must_use]
+    pub fn line_width(mut self, width: f64) -> Self {
+        self.panel
+            .field_config
+            .custom
+            .insert("lineWidth".to_owned(), json!(width));
+        self
+    }
+
+    /// Sets the point-marker size in pixels.
+    #[must_use]
+    pub fn point_size(mut self, size: f64) -> Self {
+        self.panel
+            .field_config
+            .custom
+            .insert("pointSize".to_owned(), json!(size));
+        self
+    }
+
+    /// Sets line interpolation between samples.
+    #[must_use]
+    pub fn line_interpolation(mut self, interpolation: LineInterpolation) -> Self {
+        self.panel.field_config.custom.insert(
+            "lineInterpolation".to_owned(),
+            json!(interpolation.as_grafana()),
+        );
+        self
+    }
+
+    /// Sets point-marker visibility.
+    #[must_use]
+    pub fn show_points(mut self, visibility: PointVisibility) -> Self {
+        self.panel
+            .field_config
+            .custom
+            .insert("showPoints".to_owned(), json!(visibility.as_grafana()));
+        self
+    }
+
+    /// Controls whether lines span null samples.
+    #[must_use]
+    pub fn span_nulls(mut self, span_nulls: bool) -> Self {
+        self.panel
+            .field_config
+            .custom
+            .insert("spanNulls".to_owned(), json!(span_nulls));
+        self
+    }
+
+    /// Sets series stacking mode and group.
+    #[must_use]
+    pub fn stacking(mut self, stacking: Stacking) -> Self {
+        self.panel
+            .field_config
+            .custom
+            .insert("stacking".to_owned(), stacking.as_grafana());
+        self
+    }
+
+    /// Sets typed tooltip behavior.
+    #[must_use]
+    pub fn tooltip(mut self, tooltip: Tooltip) -> Self {
+        self.panel
+            .options
+            .insert("tooltip".to_owned(), tooltip.as_grafana());
+        self
+    }
+}
+
+impl PanelBuilder<BarGaugeKind> {
+    /// Sets the visual fill style.
+    #[must_use]
+    pub fn display_mode(mut self, mode: BarGaugeDisplayMode) -> Self {
+        self.panel
+            .options
+            .insert("displayMode".to_owned(), json!(mode.as_grafana()));
+        self
+    }
+
+    /// Sets the bar orientation.
+    #[must_use]
+    pub fn orientation(mut self, orientation: Orientation) -> Self {
+        self.panel
+            .options
+            .insert("orientation".to_owned(), json!(orientation.as_grafana()));
+        self
+    }
+
+    /// Sets how fields are reduced to displayed bars.
+    #[must_use]
+    pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
+        self.panel
+            .options
+            .insert("reduceOptions".to_owned(), options.as_grafana());
         self
     }
 }

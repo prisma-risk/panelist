@@ -40,7 +40,7 @@ Panelist is under active development. Add the current release from crates.io:
 
 ```toml
 [dependencies]
-panelist = "0.1"
+panelist = "0.2"
 ```
 
 The minimum supported Rust version is 1.96. Panelist uses Rust 2024 and has no
@@ -115,10 +115,37 @@ let dashboard = Dashboard::new("HTTP")
 ```
 
 Typed models cover dashboard metadata, rows, datasources, Prometheus and Loki
-queries, query/custom/constant variables, time ranges, links, field defaults,
-thresholds, legends, and field overrides. `RawQuery`, `RawPanel`, and ordered
-`extra`/`option` methods provide explicit escape hatches for Grafana features
-that Panelist does not model yet.
+queries, datasource/query/custom/constant variables, persisted variable state,
+time ranges, links, field defaults, value mappings, thresholds, legends, field
+overrides, and common stat, time-series, gauge, and bar-gauge options.
+`RawQuery`, `RawPanel`, and ordered `extra`/`option` methods provide explicit
+escape hatches for Grafana features that Panelist does not model yet.
+
+Real-world provisioning metadata and visualization choices remain typed:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = Dashboard::new("Operations")
+    .schema_version(39)
+    .version(1)
+    .cursor_sync(DashboardCursorSync::Crosshair)
+    .variable(
+        DataSourceVariable::new("datasource", "prometheus")
+            .current(VariableSelection::new("staging", "prometheus-staging")),
+    )
+    .panel(
+        Timeseries::new("Requests")
+            .query(
+                PrometheusQuery::new("sum(rate(requests_total[5m]))")
+                    .editor_mode(QueryEditorMode::Code),
+            )
+            .fill_opacity(10.0)
+            .show_points(PointVisibility::Never)
+            .tooltip(Tooltip::new().mode(TooltipMode::Multi)),
+    );
+# let _ = dashboard;
+```
 
 ## Automatic layout
 
@@ -195,7 +222,7 @@ panicking.
 
 ## Grafana compatibility
 
-Panelist 0.1 emits Grafana Classic dashboard JSON with schema version 41. This
+Panelist 0.2 emits Grafana Classic dashboard JSON with schema version 41. This
 is deliberate: Classic remains importable/exportable in Grafana 13, works with
 file provisioning, and retains the numeric panel IDs and `gridPos` behavior
 that Panelist automates. Grafana's newer V2 resource model uses a different
@@ -226,8 +253,7 @@ Run one with `cargo run -p panelist --example basic`.
 
 - Validate generated dashboards against live Grafana 13 in CI.
 - Add an opt-in Grafana V2 resource serializer and dynamic layouts.
-- Expand panel-specific typed options, transformations, annotations, mappings,
-  and data links.
+- Expand transformations, annotations, range/regex mappings, and data links.
 - Add more datasource query types without turning the core crate into an API
   client.
 - Stabilize the API from real-world dashboard authoring feedback.

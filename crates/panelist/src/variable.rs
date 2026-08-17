@@ -45,16 +45,164 @@ impl VariableRefresh {
     }
 }
 
+/// Ordering applied to values returned for a query variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VariableSort {
+    /// Keep the datasource response order.
+    #[default]
+    Disabled,
+    /// Sort text alphabetically in ascending order.
+    AlphabeticalAscending,
+    /// Sort text alphabetically in descending order.
+    AlphabeticalDescending,
+    /// Sort numeric values in ascending order.
+    NumericalAscending,
+    /// Sort numeric values in descending order.
+    NumericalDescending,
+    /// Sort alphabetically without regard to letter case, ascending.
+    AlphabeticalCaseInsensitiveAscending,
+    /// Sort alphabetically without regard to letter case, descending.
+    AlphabeticalCaseInsensitiveDescending,
+}
+
+impl VariableSort {
+    pub(crate) const fn as_grafana(self) -> u8 {
+        match self {
+            Self::Disabled => 0,
+            Self::AlphabeticalAscending => 1,
+            Self::AlphabeticalDescending => 2,
+            Self::NumericalAscending => 3,
+            Self::NumericalDescending => 4,
+            Self::AlphabeticalCaseInsensitiveAscending => 5,
+            Self::AlphabeticalCaseInsensitiveDescending => 6,
+        }
+    }
+}
+
+/// The current text and value persisted for a dashboard variable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariableSelection {
+    pub(crate) text: String,
+    pub(crate) value: String,
+    pub(crate) selected: bool,
+}
+
+impl VariableSelection {
+    /// Creates a selected variable value with independently controlled display
+    /// text and interpolation value.
+    #[must_use]
+    pub fn new(text: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            value: value.into(),
+            selected: true,
+        }
+    }
+
+    /// Controls whether Grafana marks this persisted value as selected.
+    #[must_use]
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+}
+
+/// A variable that lets viewers select one Grafana datasource instance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataSourceVariable {
+    pub(crate) name: String,
+    pub(crate) label: Option<String>,
+    pub(crate) plugin_id: String,
+    pub(crate) current: Option<VariableSelection>,
+    pub(crate) regex: String,
+    pub(crate) refresh: VariableRefresh,
+    pub(crate) hidden: bool,
+    pub(crate) skip_url_sync: bool,
+}
+
+impl DataSourceVariable {
+    /// Creates a variable for datasource instances of `plugin_id`, such as
+    /// `prometheus` or `loki`.
+    #[must_use]
+    pub fn new(name: impl Into<String>, plugin_id: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            label: None,
+            plugin_id: plugin_id.into(),
+            current: None,
+            regex: String::new(),
+            refresh: VariableRefresh::OnDashboardLoad,
+            hidden: false,
+            skip_url_sync: false,
+        }
+    }
+
+    /// Sets the visible label.
+    #[must_use]
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Sets a persisted selection whose display text and value are identical.
+    #[must_use]
+    pub fn default(mut self, value: impl Into<String>) -> Self {
+        let value = value.into();
+        self.current = Some(VariableSelection::new(value.clone(), value));
+        self
+    }
+
+    /// Sets the complete persisted selection.
+    #[must_use]
+    pub fn current(mut self, current: VariableSelection) -> Self {
+        self.current = Some(current);
+        self
+    }
+
+    /// Filters selectable datasource names with a Grafana regular expression.
+    #[must_use]
+    pub fn regex(mut self, regex: impl Into<String>) -> Self {
+        self.regex = regex.into();
+        self
+    }
+
+    /// Controls when Grafana refreshes the datasource list.
+    #[must_use]
+    pub fn refresh(mut self, refresh: VariableRefresh) -> Self {
+        self.refresh = refresh;
+        self
+    }
+
+    /// Hides the variable control.
+    #[must_use]
+    pub fn hidden(mut self, hidden: bool) -> Self {
+        self.hidden = hidden;
+        self
+    }
+
+    /// Excludes the variable from dashboard URLs.
+    #[must_use]
+    pub fn skip_url_sync(mut self, skip_url_sync: bool) -> Self {
+        self.skip_url_sync = skip_url_sync;
+        self
+    }
+}
+
 /// A datasource-backed dashboard variable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueryVariable {
     pub(crate) name: String,
     pub(crate) label: Option<String>,
     pub(crate) query: Query,
-    pub(crate) default: Option<String>,
+    pub(crate) current: Option<VariableSelection>,
     pub(crate) datasource: Option<DataSource>,
     pub(crate) multi: bool,
     pub(crate) include_all: bool,
+    pub(crate) all_value: Option<String>,
+    pub(crate) allow_custom_value: bool,
+    pub(crate) skip_url_sync: bool,
+    pub(crate) regex: String,
+    pub(crate) sort: VariableSort,
     pub(crate) hidden: bool,
     pub(crate) refresh: VariableRefresh,
 }
@@ -67,10 +215,15 @@ impl QueryVariable {
             name: name.into(),
             label: None,
             query: query.into(),
-            default: None,
+            current: None,
             datasource: None,
             multi: false,
             include_all: false,
+            all_value: None,
+            allow_custom_value: false,
+            skip_url_sync: false,
+            regex: String::new(),
+            sort: VariableSort::AlphabeticalAscending,
             hidden: false,
             refresh: VariableRefresh::OnDashboardLoad,
         }
@@ -86,7 +239,15 @@ impl QueryVariable {
     /// Sets the selected value saved in generated JSON.
     #[must_use]
     pub fn default(mut self, value: impl Into<String>) -> Self {
-        self.default = Some(value.into());
+        let value = value.into();
+        self.current = Some(VariableSelection::new(value.clone(), value));
+        self
+    }
+
+    /// Sets the complete persisted selection.
+    #[must_use]
+    pub fn current(mut self, current: VariableSelection) -> Self {
+        self.current = Some(current);
         self
     }
 
@@ -111,6 +272,41 @@ impl QueryVariable {
         self
     }
 
+    /// Sets the interpolated value used for Grafana's `All` selection.
+    #[must_use]
+    pub fn all_value(mut self, all_value: impl Into<String>) -> Self {
+        self.all_value = Some(all_value.into());
+        self
+    }
+
+    /// Allows values not returned by the datasource query.
+    #[must_use]
+    pub fn allow_custom_value(mut self, allow_custom_value: bool) -> Self {
+        self.allow_custom_value = allow_custom_value;
+        self
+    }
+
+    /// Excludes the variable from dashboard URLs.
+    #[must_use]
+    pub fn skip_url_sync(mut self, skip_url_sync: bool) -> Self {
+        self.skip_url_sync = skip_url_sync;
+        self
+    }
+
+    /// Filters values returned by the datasource query.
+    #[must_use]
+    pub fn regex(mut self, regex: impl Into<String>) -> Self {
+        self.regex = regex.into();
+        self
+    }
+
+    /// Controls how returned values are sorted.
+    #[must_use]
+    pub fn sort(mut self, sort: VariableSort) -> Self {
+        self.sort = sort;
+        self
+    }
+
     /// Hides the variable control.
     #[must_use]
     pub fn hidden(mut self, hidden: bool) -> Self {
@@ -132,9 +328,12 @@ pub struct CustomVariable {
     pub(crate) name: String,
     pub(crate) label: Option<String>,
     pub(crate) values: Vec<String>,
-    pub(crate) default: Option<String>,
+    pub(crate) current: Option<VariableSelection>,
     pub(crate) multi: bool,
     pub(crate) include_all: bool,
+    pub(crate) all_value: Option<String>,
+    pub(crate) allow_custom_value: bool,
+    pub(crate) skip_url_sync: bool,
     pub(crate) hidden: bool,
 }
 
@@ -149,9 +348,12 @@ impl CustomVariable {
             name: name.into(),
             label: None,
             values: values.into_iter().map(Into::into).collect(),
-            default: None,
+            current: None,
             multi: false,
             include_all: false,
+            all_value: None,
+            allow_custom_value: false,
+            skip_url_sync: false,
             hidden: false,
         }
     }
@@ -166,7 +368,15 @@ impl CustomVariable {
     /// Sets the selected value saved in generated JSON.
     #[must_use]
     pub fn default(mut self, value: impl Into<String>) -> Self {
-        self.default = Some(value.into());
+        let value = value.into();
+        self.current = Some(VariableSelection::new(value.clone(), value));
+        self
+    }
+
+    /// Sets the complete persisted selection.
+    #[must_use]
+    pub fn current(mut self, current: VariableSelection) -> Self {
+        self.current = Some(current);
         self
     }
 
@@ -181,6 +391,27 @@ impl CustomVariable {
     #[must_use]
     pub fn include_all(mut self, include_all: bool) -> Self {
         self.include_all = include_all;
+        self
+    }
+
+    /// Sets the interpolated value used for Grafana's `All` selection.
+    #[must_use]
+    pub fn all_value(mut self, all_value: impl Into<String>) -> Self {
+        self.all_value = Some(all_value.into());
+        self
+    }
+
+    /// Allows values outside the configured list.
+    #[must_use]
+    pub fn allow_custom_value(mut self, allow_custom_value: bool) -> Self {
+        self.allow_custom_value = allow_custom_value;
+        self
+    }
+
+    /// Excludes the variable from dashboard URLs.
+    #[must_use]
+    pub fn skip_url_sync(mut self, skip_url_sync: bool) -> Self {
+        self.skip_url_sync = skip_url_sync;
         self
     }
 
@@ -232,6 +463,8 @@ impl ConstantVariable {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Variable {
+    /// Grafana datasource instance selector.
+    DataSource(DataSourceVariable),
     /// Datasource query variable.
     Query(Box<QueryVariable>),
     /// Fixed list variable.
@@ -243,10 +476,17 @@ pub enum Variable {
 impl Variable {
     pub(crate) fn name(&self) -> &str {
         match self {
+            Self::DataSource(variable) => &variable.name,
             Self::Query(variable) => &variable.name,
             Self::Custom(variable) => &variable.name,
             Self::Constant(variable) => &variable.name,
         }
+    }
+}
+
+impl From<DataSourceVariable> for Variable {
+    fn from(value: DataSourceVariable) -> Self {
+        Self::DataSource(value)
     }
 }
 
@@ -382,14 +622,22 @@ impl VariableBuilder {
     #[must_use]
     pub fn build(self) -> Variable {
         if let Some(query) = self.query {
+            let current = self
+                .default
+                .map(|value| VariableSelection::new(value.clone(), value));
             Variable::Query(Box::new(QueryVariable {
                 name: self.name,
                 label: self.label,
                 query,
-                default: self.default,
+                current,
                 datasource: self.datasource,
                 multi: self.multi,
                 include_all: self.include_all,
+                all_value: None,
+                allow_custom_value: false,
+                skip_url_sync: false,
+                regex: String::new(),
+                sort: VariableSort::AlphabeticalAscending,
                 hidden: self.hidden,
                 refresh: self.refresh,
             }))
@@ -401,13 +649,19 @@ impl VariableBuilder {
                 hidden: self.hidden,
             })
         } else {
+            let current = self
+                .default
+                .map(|value| VariableSelection::new(value.clone(), value));
             Variable::Custom(CustomVariable {
                 name: self.name,
                 label: self.label,
                 values: self.values,
-                default: self.default,
+                current,
                 multi: self.multi,
                 include_all: self.include_all,
+                all_value: None,
+                allow_custom_value: false,
+                skip_url_sync: false,
                 hidden: self.hidden,
             })
         }

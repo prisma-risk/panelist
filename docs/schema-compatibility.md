@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Grafana schema compatibility
 
-Panelist 0.1 emits the Grafana Classic dashboard JSON model at schema version
+Panelist 0.2 emits the Grafana Classic dashboard JSON model at schema version
 41. The choice is a compatibility boundary, not an attempt to claim that
 Classic is Grafana's newest schema.
 
@@ -9,7 +9,7 @@ Grafana 13 makes the V2 resource model and dynamic layouts generally available.
 Grafana nevertheless continues to import and export Classic dashboards, and
 its provisioning documentation explicitly supports Classic files. Classic is
 also the model with numeric panel IDs, row panels, targets, and a 24-column
-`gridPos`, which are the behaviors Panelist 0.1 automates.
+`gridPos`, which are the behaviors Panelist automates.
 
 Primary references:
 
