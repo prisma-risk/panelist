@@ -29,6 +29,7 @@ mod field;
 mod layout;
 mod panel;
 mod query;
+mod transform;
 mod validate;
 mod variable;
 mod vocabulary;

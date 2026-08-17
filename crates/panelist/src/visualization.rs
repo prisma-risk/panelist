@@ -247,6 +247,24 @@ impl Default for ReduceOptions {
     }
 }
 
+/// Ascending or descending ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortDirection {
+    /// Smallest value first.
+    #[default]
+    Ascending,
+    /// Largest value first.
+    Descending,
+}
+
+impl SortDirection {
+    /// Returns whether this direction sorts largest-first.
+    #[must_use]
+    pub const fn is_descending(self) -> bool {
+        matches!(self, Self::Descending)
+    }
+}
+
 /// Visual fill style for a bar-gauge panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BarGaugeDisplayMode {

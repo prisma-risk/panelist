@@ -58,6 +58,7 @@ mod grafana;
 mod macros;
 mod panel;
 mod query;
+mod transformation;
 mod validation;
 mod variable;
 mod visualization;
@@ -74,6 +75,10 @@ pub use panel::{
     TextMode, Timeseries,
 };
 pub use query::{LokiQuery, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery};
+pub use transformation::{
+    JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, OrganizeFields, RawTransformation,
+    SortBy, TimeSeriesToTable, Transformation,
+};
 pub use validation::{Error, Result, ValidationError, ValidationErrors};
 pub use variable::{
     ConstantVariable, CustomVariable, DataSourceVariable, QueryVariable, Variable, VariableBuilder,
@@ -81,7 +86,8 @@ pub use variable::{
 };
 pub use visualization::{
     BarGaugeDisplayMode, LineInterpolation, Orientation, PointVisibility, ReduceOptions, Reducer,
-    Stacking, StackingMode, StatColorMode, StatGraphMode, Tooltip, TooltipMode, TooltipSort,
+    SortDirection, Stacking, StackingMode, StatColorMode, StatGraphMode, Tooltip, TooltipMode,
+    TooltipSort,
 };
 
 #[doc(hidden)]
@@ -94,13 +100,14 @@ pub mod prelude {
     pub use crate::{
         BarGauge, BarGaugeDisplayMode, Color, ColorScheme, ConstantVariable, CustomVariable,
         Dashboard, DashboardCursorSync, DashboardLink, DataSource, DataSourceVariable, FieldConfig,
-        FieldOverride, Gauge, GridPos, Heatmap, Legend, LegendMode, LegendPlacement,
-        LineInterpolation, LokiQuery, Orientation, OverrideMatcher, OverrideProperty, Panel,
-        PanelKind, PointVisibility, PrometheusQuery, Query, QueryEditorMode, QueryVariable,
-        RawPanel, RawQuery, ReduceOptions, Reducer, Row, Stacking, StackingMode, Stat,
-        StatColorMode, StatGraphMode, Table, Text, TextMode, ThresholdMode, Thresholds, TimeRange,
-        Timeseries, Tooltip, TooltipMode, TooltipSort, Unit, ValueMapping, Variable,
-        VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus,
-        promql,
+        FieldOverride, Gauge, GridPos, Heatmap, JoinByField, JoinMode, LabelsToFields,
+        LabelsToFieldsMode, Legend, LegendMode, LegendPlacement, LineInterpolation, LokiQuery,
+        OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel, PanelKind,
+        PointVisibility, PrometheusQuery, Query, QueryEditorMode, QueryVariable, RawPanel,
+        RawQuery, RawTransformation, ReduceOptions, Reducer, Row, SortBy, SortDirection, Stacking,
+        StackingMode, Stat, StatColorMode, StatGraphMode, Table, Text, TextMode, ThresholdMode,
+        Thresholds, TimeRange, TimeSeriesToTable, Timeseries, Tooltip, TooltipMode, TooltipSort,
+        Transformation, Unit, ValueMapping, Variable, VariableRefresh, VariableSelection,
+        VariableSort, dashboard, loki, loki_query, prometheus, promql,
     };
 }

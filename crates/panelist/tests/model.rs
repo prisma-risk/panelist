@@ -555,3 +555,80 @@ fn timeseries_tooltip_default_matches_kind_default() {
         without["panels"][0]["options"]["tooltip"]
     );
 }
+
+#[test]
+fn transformations_serialize_in_authored_order() {
+    let dashboard = Dashboard::new("Transforms").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new(
+                "sum by (route) (rate(requests_total[5m]))",
+            ))
+            .transform(JoinByField::new("route"))
+            .transform(
+                OrganizeFields::new()
+                    .rename("Value #A", "RPS")
+                    .hide("Time")
+                    .order(["route", "RPS"]),
+            )
+            .transform(SortBy::desc("RPS")),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(
+        transformations[0],
+        json!({"id": "joinByField", "options": {"byField": "route", "mode": "outer"}})
+    );
+    assert_eq!(
+        transformations[1],
+        json!({
+            "id": "organize",
+            "options": {
+                "excludeByName": {"Time": true},
+                "indexByName": {"RPS": 1, "route": 0},
+                "renameByName": {"Value #A": "RPS"},
+            }
+        })
+    );
+    assert_eq!(
+        transformations[2],
+        json!({"id": "sortBy", "options": {"sort": [{"field": "RPS", "desc": true}]}})
+    );
+}
+
+#[test]
+fn time_series_to_table_options_are_keyed_by_ref_id() {
+    let dashboard = Dashboard::new("Trend").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .query(PrometheusQuery::new("rate(x[5m])").ref_id("D"))
+            .transform(TimeSeriesToTable::new().query_with("D", Reducer::Last)),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(
+        transformations[0],
+        json!({"id": "timeSeriesTable", "options": {"D": {"stat": "lastNotNull"}}})
+    );
+}
+
+#[test]
+fn join_modes_and_labels_to_fields_serialize() {
+    let dashboard = Dashboard::new("Modes").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(JoinByField::inner("route"))
+            .transform(LabelsToFields::new().keep(["route"]))
+            .transform(RawTransformation::new("myPlugin").option("depth", json!(3))),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(transformations[0]["options"]["mode"], "inner");
+    assert_eq!(
+        transformations[1],
+        json!({"id": "labelsToFields", "options": {"mode": "columns", "keepLabels": ["route"]}})
+    );
+    assert_eq!(
+        transformations[2],
+        json!({"id": "myPlugin", "options": {"depth": 3}})
+    );
+}

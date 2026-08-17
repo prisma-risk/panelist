@@ -115,6 +115,8 @@ pub(crate) struct GrafanaPanel {
     pub(crate) datasource: Option<DataSource>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) targets: Vec<GrafanaTarget>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) transformations: Vec<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) field_config: Option<GrafanaFieldConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]

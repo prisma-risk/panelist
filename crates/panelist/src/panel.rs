@@ -28,7 +28,7 @@ use serde_json::Value;
 use crate::{
     BarGaugeDisplayMode, ColorScheme, DashboardLink, DataSource, FieldConfig, FieldOverride,
     Legend, LineInterpolation, Orientation, PointVisibility, Query, ReduceOptions, Stacking,
-    StatColorMode, StatGraphMode, Thresholds, Tooltip, Unit, ValueMapping,
+    StatColorMode, StatGraphMode, Thresholds, Tooltip, Transformation, Unit, ValueMapping,
     visualization::{BarGaugeOptions, GaugeOptions, StatOptions, TimeseriesOptions},
 };
 
@@ -104,6 +104,7 @@ pub struct Panel {
     pub(crate) grid_pos: Option<GridPos>,
     pub(crate) datasource: Option<DataSource>,
     pub(crate) queries: Vec<Query>,
+    pub(crate) transformations: Vec<Transformation>,
     pub(crate) field_config: FieldConfig,
     pub(crate) text: Option<(TextMode, String)>,
     pub(crate) links: Vec<DashboardLink>,
@@ -125,6 +126,7 @@ impl Panel {
             grid_pos: None,
             datasource: None,
             queries: Vec::new(),
+            transformations: Vec::new(),
             field_config: FieldConfig::default(),
             text: None,
             links: Vec::new(),
@@ -314,6 +316,15 @@ impl<K: PanelType> PanelBuilder<K> {
     #[must_use]
     pub fn query(mut self, query: impl Into<Query>) -> Self {
         self.panel.queries.push(query.into());
+        self
+    }
+
+    /// Appends a transformation applied to this panel's query results.
+    ///
+    /// Transformations run in the order they are added.
+    #[must_use]
+    pub fn transform(mut self, transformation: impl Into<Transformation>) -> Self {
+        self.panel.transformations.push(transformation.into());
         self
     }
 
@@ -683,6 +694,15 @@ impl RawPanel {
     #[must_use]
     pub fn query(mut self, query: impl Into<Query>) -> Self {
         self.panel.queries.push(query.into());
+        self
+    }
+
+    /// Appends a transformation applied to this panel's query results.
+    ///
+    /// Transformations run in the order they are added.
+    #[must_use]
+    pub fn transform(mut self, transformation: impl Into<Transformation>) -> Self {
+        self.panel.transformations.push(transformation.into());
         self
     }
 

@@ -72,6 +72,7 @@ pub(crate) fn normalize_row(row: &Row, id: u32, y: u16, panels: Vec<GrafanaPanel
         },
         datasource: None,
         targets: Vec::new(),
+        transformations: Vec::new(),
         field_config: None,
         options: None,
         transparent: false,
@@ -116,6 +117,11 @@ pub(crate) fn normalize_panel(
         grid_pos: grid.into(),
         datasource,
         targets,
+        transformations: panel
+            .transformations
+            .iter()
+            .map(super::transform::normalize_transformation)
+            .collect(),
         field_config: Some(normalize_field_config(
             &panel.field_config,
             &panel.kind,
