@@ -124,13 +124,16 @@ pub(crate) fn typed_field_custom(options: &PanelOptions) -> BTreeMap<String, Val
     let mut output = BTreeMap::new();
     match options {
         // Exhaustive on purpose: a new `PanelOptions` variant that owns
-        // `fieldConfig.defaults.custom` keys (e.g. Task 9's table cell
+        // `fieldConfig.defaults.custom` keys (e.g. Task 10's heatmap
         // options) must fail to compile here until it is spelled out, rather
-        // than silently falling through and dropping its keys.
+        // than silently falling through and dropping its keys. Table's own
+        // cell renderer lives on `FieldConfig.cell`, not here, so it joins
+        // this no-op group.
         PanelOptions::None
         | PanelOptions::Stat(_)
         | PanelOptions::Gauge(_)
-        | PanelOptions::BarGauge(_) => {}
+        | PanelOptions::BarGauge(_)
+        | PanelOptions::Table(_) => {}
         PanelOptions::Timeseries(timeseries) => {
             if let Some(opacity) = timeseries.fill_opacity {
                 output.insert("fillOpacity".to_owned(), json!(opacity));

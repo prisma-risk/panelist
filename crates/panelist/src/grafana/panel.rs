@@ -259,6 +259,23 @@ pub(crate) fn typed_panel_options(options: &PanelOptions) -> BTreeMap<String, Va
                 output.insert("legend".to_owned(), legend_value(Some(legend)));
             }
         }
+        PanelOptions::Table(table) => {
+            if !table.sort_by.is_empty() {
+                output.insert(
+                    "sortBy".to_owned(),
+                    json!(
+                        table
+                            .sort_by
+                            .iter()
+                            .map(|sort| json!({
+                                "displayName": sort.field,
+                                "desc": sort.descending,
+                            }))
+                            .collect::<Vec<_>>()
+                    ),
+                );
+            }
+        }
     }
     output
 }

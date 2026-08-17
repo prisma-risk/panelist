@@ -151,6 +151,10 @@ pub(crate) struct SortByField {
 }
 
 /// Sorts rows by one or more fields.
+///
+/// This reorders the data itself and keys on the raw field name. To set
+/// only a table panel's initial sort state, which Grafana keys on the
+/// field's display name, use [`crate::Table::sort_by`] instead.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SortBy {
     pub(crate) fields: Vec<SortByField>,

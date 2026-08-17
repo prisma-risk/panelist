@@ -21,7 +21,7 @@
 //  limitations under the License.
 //
 
-use crate::BarGaugeDisplayMode;
+use crate::{BarGaugeDisplayMode, SortDirection};
 
 /// A Grafana table cell rendering mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -212,4 +212,33 @@ impl From<SparklineCell> for TableCell {
     fn from(value: SparklineCell) -> Self {
         Self::Sparkline(value)
     }
+}
+
+/// One field in a table panel's initial sort order.
+///
+/// This is the panel's own `options.sortBy` state, which Grafana keys on
+/// the field's *display name*. It is distinct from the
+/// [`crate::SortBy`] transformation, which reorders the underlying data
+/// and keys on the raw field name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableSort {
+    pub(crate) field: String,
+    pub(crate) descending: bool,
+}
+
+impl TableSort {
+    /// Sorts a table column in the given direction.
+    #[must_use]
+    pub fn new(field: impl Into<String>, direction: SortDirection) -> Self {
+        Self {
+            field: field.into(),
+            descending: direction.is_descending(),
+        }
+    }
+}
+
+/// Typed authoring state for the Grafana table panel.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct TableOptions {
+    pub(crate) sort_by: Vec<TableSort>,
 }

@@ -782,3 +782,21 @@ fn cell_options_serialize_per_variant() {
         json!({"type": "sparkline", "hideValue": true, "lineWidth": 2.0, "fillOpacity": 20.0})
     );
 }
+
+#[test]
+fn table_sorting_serializes_as_a_panel_option() {
+    let dashboard = Dashboard::new("Sorted").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .sort_by("p95", SortDirection::Descending)
+            .sort_by("route", SortDirection::Ascending),
+    );
+
+    assert_eq!(
+        as_value(&dashboard)["panels"][0]["options"]["sortBy"],
+        json!([
+            {"displayName": "p95", "desc": true},
+            {"displayName": "route", "desc": false}
+        ])
+    );
+}

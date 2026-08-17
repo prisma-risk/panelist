@@ -27,8 +27,10 @@ use serde_json::Value;
 
 use crate::{
     BarGaugeDisplayMode, ColorScheme, DashboardLink, DataSource, FieldConfig, FieldOverride,
-    Legend, LineInterpolation, Orientation, PointVisibility, Query, ReduceOptions, Stacking,
-    StatColorMode, StatGraphMode, Thresholds, Tooltip, Transformation, Unit, ValueMapping,
+    Legend, LineInterpolation, Orientation, PointVisibility, Query, ReduceOptions, SortDirection,
+    Stacking, StatColorMode, StatGraphMode, TableCell, TableSort, Thresholds, Tooltip,
+    Transformation, Unit, ValueMapping,
+    table::TableOptions,
     visualization::{BarGaugeOptions, GaugeOptions, StatOptions, TimeseriesOptions},
 };
 
@@ -164,6 +166,7 @@ pub(crate) enum PanelOptions {
     Gauge(GaugeOptions),
     Timeseries(TimeseriesOptions),
     BarGauge(BarGaugeOptions),
+    Table(TableOptions),
 }
 
 macro_rules! kind_options {
@@ -191,6 +194,7 @@ kind_options!(
     gauge => Gauge(GaugeOptions),
     timeseries => Timeseries(TimeseriesOptions),
     bar_gauge => BarGauge(BarGaugeOptions),
+    table => Table(TableOptions),
 );
 
 /// Marker trait implemented by typed panel builders.
@@ -665,6 +669,30 @@ impl PanelBuilder<BarGaugeKind> {
     #[must_use]
     pub fn reduce_options(mut self, options: ReduceOptions) -> Self {
         self.panel.kind_options.bar_gauge().reduce = Some(options);
+        self
+    }
+}
+
+impl PanelBuilder<TableKind> {
+    /// Appends a field to the table's initial sort order.
+    ///
+    /// This is the panel's own sort state, which Grafana keys on the field's
+    /// display name. It is distinct from the [`crate::SortBy`] transformation,
+    /// which reorders the underlying data and keys on the raw field name.
+    #[must_use]
+    pub fn sort_by(mut self, field: impl Into<String>, direction: SortDirection) -> Self {
+        self.panel
+            .kind_options
+            .table()
+            .sort_by
+            .push(TableSort::new(field, direction));
+        self
+    }
+
+    /// Sets the default cell renderer for every column.
+    #[must_use]
+    pub fn cell(mut self, cell: impl Into<TableCell>) -> Self {
+        self.panel.field_config.cell = Some(cell.into());
         self
     }
 }
