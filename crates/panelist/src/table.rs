@@ -221,7 +221,7 @@ impl From<SparklineCell> for TableCell {
 /// [`crate::SortBy`] transformation, which reorders the underlying data
 /// and keys on the raw field name.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TableSort {
+pub(crate) struct TableSort {
     pub(crate) field: String,
     pub(crate) descending: bool,
 }

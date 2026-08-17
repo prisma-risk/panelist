@@ -24,8 +24,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    Dashboard, DashboardItem, Panel, Thresholds, Transformation, TransformationFilter,
-    ValidationError, ValidationErrors, Variable,
+    Dashboard, DashboardItem, OverrideMatcher, Panel, Thresholds, Transformation, ValidationError,
+    ValidationErrors, Variable, transformation::TransformationFilter,
 };
 
 use super::query::effective_ref_ids;
@@ -140,6 +140,16 @@ pub(crate) fn validate_panel(
     let ref_ids: HashSet<String> = effective_ref_ids(&panel.queries).into_iter().collect();
     for transformation in &panel.transformations {
         validate_transformation(panel, transformation, &ref_ids, errors);
+    }
+    for field_override in &panel.field_config.overrides {
+        if let OverrideMatcher::QueryRefId(ref_id) = &field_override.matcher
+            && !ref_ids.contains(ref_id)
+        {
+            errors.push(ValidationError::UnknownOverrideRefId {
+                panel: panel.title.clone(),
+                ref_id: ref_id.clone(),
+            });
+        }
     }
 }
 

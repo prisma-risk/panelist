@@ -29,7 +29,7 @@
 
 use serde_json::{Value, json};
 
-use crate::{JoinMode, LabelsToFieldsMode, Transformation, TransformationFilter};
+use crate::{JoinMode, LabelsToFieldsMode, Transformation, transformation::TransformationFilter};
 
 pub(crate) fn normalize_transformation(transformation: &Transformation) -> Value {
     let (id, options) = match transformation {

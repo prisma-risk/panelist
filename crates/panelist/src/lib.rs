@@ -82,11 +82,11 @@ pub use query::{
 };
 pub use table::{
     CellBackgroundMode, CellValueDisplay, ColoredBackgroundCell, GaugeCell, SparklineCell,
-    TableCell, TableCellType, TableSort,
+    TableCell, TableCellType,
 };
 pub use transformation::{
     JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, OrganizeFields, RawTransformation,
-    SortBy, TimeSeriesToTable, Transformation, TransformationFilter,
+    SortBy, TimeSeriesToTable, Transformation,
 };
 pub use validation::{Error, Result, ValidationError, ValidationErrors};
 pub use variable::{
@@ -117,9 +117,9 @@ pub mod prelude {
         PrometheusQuery, Query, QueryEditorMode, QueryVariable, RawPanel, RawQuery,
         RawTransformation, ReduceOptions, Reducer, Row, SortBy, SortDirection, SparklineCell,
         Stacking, StackingMode, Stat, StatColorMode, StatGraphMode, Table, TableCell,
-        TableCellType, TableSort, Text, TextMode, ThresholdMode, Thresholds, TimeRange,
-        TimeSeriesToTable, Timeseries, Tooltip, TooltipMode, TooltipSort, Transformation,
-        TransformationFilter, Unit, ValueMapping, Variable, VariableRefresh, VariableSelection,
-        VariableSort, dashboard, loki, loki_query, prometheus, promql,
+        TableCellType, Text, TextMode, ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable,
+        Timeseries, Tooltip, TooltipMode, TooltipSort, Transformation, Unit, ValueMapping,
+        Variable, VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query,
+        prometheus, promql,
     };
 }

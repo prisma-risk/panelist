@@ -720,6 +720,32 @@ fn auto_assigned_ref_ids_satisfy_transformation_validation() {
 }
 
 #[test]
+fn unknown_override_ref_ids_are_rejected() {
+    let dashboard = Dashboard::new("Bad override ref").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .override_field(FieldOverride::by_query("ZZZ").unit(Unit::Percent)),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::UnknownOverrideRefId { ref_id, .. }] if ref_id == "ZZZ"
+    ));
+}
+
+#[test]
+fn known_override_ref_ids_pass_validation() {
+    let dashboard = Dashboard::new("Good override ref").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .override_field(FieldOverride::by_query("A").unit(Unit::Percent)),
+    );
+
+    dashboard.validate().unwrap();
+}
+
+#[test]
 fn empty_transformation_fields_are_rejected() {
     let dashboard = Dashboard::new("Empty").panel(
         Table::new("Routes")

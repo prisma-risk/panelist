@@ -36,7 +36,7 @@ use crate::{Reducer, SortDirection};
 /// keep them apart rather than reusing one for the other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum TransformationFilter {
+pub(crate) enum TransformationFilter {
     /// Matches the data frame produced by one query reference ID.
     RefId(String),
     /// Matches a data frame by its name.

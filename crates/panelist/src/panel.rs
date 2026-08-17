@@ -29,9 +29,9 @@ use crate::{
     AxisPlacement, BarGaugeDisplayMode, ColorScheme, DashboardLink, DataSource, FieldConfig,
     FieldOverride, HeatmapColorMode, HeatmapColorScheme, Legend, LineInterpolation, Orientation,
     PointVisibility, Query, ReduceOptions, SortDirection, Stacking, StatColorMode, StatGraphMode,
-    TableCell, TableSort, Thresholds, Tooltip, Transformation, Unit, ValueMapping,
+    TableCell, Thresholds, Tooltip, Transformation, Unit, ValueMapping,
     heatmap::HeatmapOptions,
-    table::TableOptions,
+    table::{TableOptions, TableSort},
     visualization::{BarGaugeOptions, GaugeOptions, StatOptions, TimeseriesOptions},
 };
 

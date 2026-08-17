@@ -158,6 +158,15 @@ pub enum ValidationError {
         /// Unresolved query reference.
         ref_id: String,
     },
+    /// A field override's `by_query` matcher references a query reference ID
+    /// the panel does not have.
+    #[error("panel \"{panel}\": field override references unknown query reference ID \"{ref_id}\"")]
+    UnknownOverrideRefId {
+        /// Panel title.
+        panel: String,
+        /// Unresolved query reference.
+        ref_id: String,
+    },
     /// A transformation is missing a required field name.
     #[error("panel \"{panel}\": {transformation} transformation requires a field name")]
     MissingTransformationField {
