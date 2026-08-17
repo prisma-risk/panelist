@@ -33,7 +33,7 @@ doc:
 	RUSTDOCFLAGS="-D warnings -D missing-docs" $(CARGO) doc --workspace --all-features --no-deps --locked
 
 headers:
-	python3 scripts/check-spdx-headers.py
+	python3 scripts/check-panelist-header.py
 	cmp LICENSE crates/panelist/LICENSE
 
 package:
@@ -57,7 +57,7 @@ help:
 	@echo "  make build        Build the locked workspace"
 	@echo "  make test         Test the locked workspace"
 	@echo "  make doc          Build rustdoc with warnings denied"
-	@echo "  make headers      Verify Rust SPDX headers"
+	@echo "  make headers      Verify Rust source headers"
 	@echo "  make package      Verify the distributable crate tarball"
 	@echo "  make deny         Check licenses and advisories"
 	@echo "  make clean        Remove Cargo build output"
