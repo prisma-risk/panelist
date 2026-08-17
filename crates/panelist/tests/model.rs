@@ -156,6 +156,30 @@ fn serializes_units_thresholds_legends_and_overrides() {
 }
 
 #[test]
+fn matchers_cover_queries_names_and_field_classes() {
+    let dashboard = Dashboard::new("Matchers").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("B"))
+            .override_field(FieldOverride::by_query("B").unit(Unit::Percent))
+            .override_field(FieldOverride::by_names(["p50", "p95"]).decimals(2))
+            .override_field(FieldOverride::numeric_fields().decimals(3))
+            .override_field(FieldOverride::time_fields().display_name("When")),
+    );
+
+    let overrides = &as_value(&dashboard)["panels"][0]["fieldConfig"]["overrides"];
+    assert_eq!(
+        overrides[0]["matcher"],
+        json!({"id": "byFrameRefID", "options": "B"})
+    );
+    assert_eq!(
+        overrides[1]["matcher"],
+        json!({"id": "byNames", "options": ["p50", "p95"]})
+    );
+    assert_eq!(overrides[2]["matcher"], json!({"id": "numeric"}));
+    assert_eq!(overrides[3]["matcher"], json!({"id": "time"}));
+}
+
+#[test]
 fn serializes_every_initial_panel_type() {
     let dashboard = Dashboard::new("Kinds")
         .panel(Timeseries::new("Timeseries"))

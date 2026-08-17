@@ -197,7 +197,8 @@ pub(crate) struct GrafanaFieldOverride {
 #[derive(Debug, Serialize)]
 pub(crate) struct GrafanaMatcher {
     pub(crate) id: &'static str,
-    pub(crate) options: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) options: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]

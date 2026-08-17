@@ -167,18 +167,37 @@ pub(crate) fn typed_field_custom(options: &PanelOptions) -> BTreeMap<String, Val
 }
 
 pub(crate) fn normalize_override(field_override: &FieldOverride) -> GrafanaFieldOverride {
+    // Field matchers, distinct from the frame matchers used by transformation
+    // filters (see `grafana/transform.rs`). "which query" is spelled
+    // `byFrameRefID` here and `byRefId` there — do not conflate the two.
     let matcher = match &field_override.matcher {
         OverrideMatcher::Name(name) => GrafanaMatcher {
             id: "byName",
-            options: name.clone(),
+            options: Some(json!(name)),
         },
         OverrideMatcher::Regex(regex) => GrafanaMatcher {
             id: "byRegexp",
-            options: regex.clone(),
+            options: Some(json!(regex)),
         },
         OverrideMatcher::Type(field_type) => GrafanaMatcher {
             id: "byType",
-            options: field_type.clone(),
+            options: Some(json!(field_type)),
+        },
+        OverrideMatcher::QueryRefId(ref_id) => GrafanaMatcher {
+            id: "byFrameRefID",
+            options: Some(json!(ref_id)),
+        },
+        OverrideMatcher::Names(names) => GrafanaMatcher {
+            id: "byNames",
+            options: Some(json!(names)),
+        },
+        OverrideMatcher::Numeric => GrafanaMatcher {
+            id: "numeric",
+            options: None,
+        },
+        OverrideMatcher::Time => GrafanaMatcher {
+            id: "time",
+            options: None,
         },
     };
 

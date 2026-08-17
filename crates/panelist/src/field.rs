@@ -318,6 +318,14 @@ pub enum OverrideMatcher {
     Regex(String),
     /// Match a Grafana field type such as `number` or `string`.
     Type(String),
+    /// Match every field returned by one query reference ID.
+    QueryRefId(String),
+    /// Match an explicit list of field names.
+    Names(Vec<String>),
+    /// Match every numeric field.
+    Numeric,
+    /// Match every time field.
+    Time,
 }
 
 /// A typed or custom field override property.
@@ -386,11 +394,77 @@ impl FieldOverride {
         }
     }
 
+    /// Matches every field returned by one query.
+    #[must_use]
+    pub fn by_query(ref_id: impl Into<String>) -> Self {
+        Self {
+            matcher: OverrideMatcher::QueryRefId(ref_id.into()),
+            properties: Vec::new(),
+        }
+    }
+
+    /// Matches an explicit list of field names.
+    #[must_use]
+    pub fn by_names(names: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            matcher: OverrideMatcher::Names(names.into_iter().map(Into::into).collect()),
+            properties: Vec::new(),
+        }
+    }
+
+    /// Matches every numeric field.
+    #[must_use]
+    pub fn numeric_fields() -> Self {
+        Self {
+            matcher: OverrideMatcher::Numeric,
+            properties: Vec::new(),
+        }
+    }
+
+    /// Matches every time field.
+    #[must_use]
+    pub fn time_fields() -> Self {
+        Self {
+            matcher: OverrideMatcher::Time,
+            properties: Vec::new(),
+        }
+    }
+
     /// Appends an override property.
     #[must_use]
     pub fn property(mut self, property: OverrideProperty) -> Self {
         self.properties.push(property);
         self
+    }
+
+    /// Sets the field unit.
+    #[must_use]
+    pub fn unit(self, unit: Unit) -> Self {
+        self.property(OverrideProperty::Unit(unit))
+    }
+
+    /// Sets the field minimum.
+    #[must_use]
+    pub fn min(self, min: f64) -> Self {
+        self.property(OverrideProperty::Min(min))
+    }
+
+    /// Sets the field maximum.
+    #[must_use]
+    pub fn max(self, max: f64) -> Self {
+        self.property(OverrideProperty::Max(max))
+    }
+
+    /// Sets the displayed decimal count.
+    #[must_use]
+    pub fn decimals(self, decimals: u8) -> Self {
+        self.property(OverrideProperty::Decimals(decimals))
+    }
+
+    /// Sets the display name.
+    #[must_use]
+    pub fn display_name(self, display_name: impl Into<String>) -> Self {
+        self.property(OverrideProperty::DisplayName(display_name.into()))
     }
 
     /// Sets a fixed color.
