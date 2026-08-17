@@ -1,0 +1,175 @@
+//
+//  ░█▀█░█▀█░█▀█░█▀▀░█░░░▀█▀░█▀▀░▀█▀
+//  ░█▀▀░█▀█░█░█░█▀▀░█░░░░█░░▀▀█░░█░
+//  ░▀░░░▀░▀░▀░▀░▀▀▀░▀▀▀░▀▀▀░▀▀▀░░▀░
+//
+//  Panelist — Strongly Typed Grafana Dashboards
+//  https://github.com/prisma-risk/panelist
+//
+//  Copyright (c) 2026 Prisma Risk
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//      https://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+//
+
+use std::collections::BTreeMap;
+
+use serde_json::{Value, json};
+
+use crate::{DataSource, GridPos, Legend, LegendMode, Panel, PanelKind, Row};
+
+use super::field::normalize_field_config;
+use super::query::normalize_targets;
+use super::wire::{GrafanaGridPos, GrafanaLink, GrafanaPanel};
+
+pub(crate) fn normalize_row(row: &Row, id: u32, y: u16, panels: Vec<GrafanaPanel>) -> GrafanaPanel {
+    GrafanaPanel {
+        id,
+        kind: "row".to_owned(),
+        title: row.title.clone(),
+        description: None,
+        grid_pos: GrafanaGridPos {
+            x: 0,
+            y,
+            w: 24,
+            h: 1,
+        },
+        datasource: None,
+        targets: Vec::new(),
+        field_config: None,
+        options: None,
+        transparent: false,
+        links: Vec::new(),
+        collapsed: Some(row.collapsed),
+        panels,
+        extra: BTreeMap::new(),
+    }
+}
+
+pub(crate) fn normalize_panel(
+    panel: &Panel,
+    id: u32,
+    grid: GridPos,
+    default_datasource: Option<&DataSource>,
+) -> GrafanaPanel {
+    let datasource = panel.datasource.as_ref().or(default_datasource).cloned();
+    let targets = normalize_targets(&panel.queries, datasource.as_ref());
+    let mut options = default_panel_options(panel);
+    options.extend(panel.options.clone());
+
+    GrafanaPanel {
+        id,
+        kind: panel.kind.plugin_id().to_owned(),
+        title: panel.title.clone(),
+        description: panel.description.clone(),
+        grid_pos: grid.into(),
+        datasource,
+        targets,
+        field_config: Some(normalize_field_config(&panel.field_config, &panel.kind)),
+        options: Some(options),
+        transparent: panel.transparent,
+        links: panel.links.iter().map(GrafanaLink::from).collect(),
+        collapsed: None,
+        panels: Vec::new(),
+        extra: panel.extra.clone(),
+    }
+}
+
+pub(crate) fn default_panel_options(panel: &Panel) -> BTreeMap<String, Value> {
+    let mut options = BTreeMap::new();
+    match &panel.kind {
+        PanelKind::Timeseries => {
+            options.insert("legend".to_owned(), legend_value(panel.legend.as_ref()));
+            options.insert(
+                "tooltip".to_owned(),
+                json!({"mode": "single", "sort": "none", "hideZeros": false}),
+            );
+        }
+        PanelKind::Stat => {
+            options.insert("colorMode".to_owned(), json!("value"));
+            options.insert("graphMode".to_owned(), json!("area"));
+            options.insert("justifyMode".to_owned(), json!("auto"));
+            options.insert("orientation".to_owned(), json!("auto"));
+            options.insert(
+                "reduceOptions".to_owned(),
+                json!({"values": false, "calcs": ["lastNotNull"], "fields": ""}),
+            );
+            options.insert("textMode".to_owned(), json!("auto"));
+        }
+        PanelKind::Gauge => {
+            options.insert("orientation".to_owned(), json!("auto"));
+            options.insert(
+                "reduceOptions".to_owned(),
+                json!({"values": false, "calcs": ["lastNotNull"], "fields": ""}),
+            );
+            options.insert("showThresholdLabels".to_owned(), json!(false));
+            options.insert("showThresholdMarkers".to_owned(), json!(true));
+        }
+        PanelKind::Table => {
+            options.insert("cellHeight".to_owned(), json!("sm"));
+            options.insert("showHeader".to_owned(), json!(true));
+        }
+        PanelKind::Text => {
+            let (mode, content) = panel
+                .text
+                .as_ref()
+                .map_or((crate::TextMode::Markdown, ""), |(mode, content)| {
+                    (*mode, content.as_str())
+                });
+            options.insert("content".to_owned(), json!(content));
+            options.insert("mode".to_owned(), json!(mode.as_grafana()));
+        }
+        PanelKind::BarGauge => {
+            options.insert("displayMode".to_owned(), json!("gradient"));
+            options.insert("orientation".to_owned(), json!("horizontal"));
+            options.insert(
+                "reduceOptions".to_owned(),
+                json!({"values": false, "calcs": ["lastNotNull"], "fields": ""}),
+            );
+            options.insert("showUnfilled".to_owned(), json!(true));
+        }
+        PanelKind::Heatmap => {
+            options.insert("calculate".to_owned(), json!(false));
+            options.insert("cellGap".to_owned(), json!(1));
+            options.insert(
+                "color".to_owned(),
+                json!({"mode": "scheme", "scheme": "Oranges", "steps": 64}),
+            );
+            options.insert("legend".to_owned(), json!({"show": true}));
+            options.insert("yAxis".to_owned(), json!({"axisPlacement": "left"}));
+        }
+        PanelKind::Raw(_) => {}
+    }
+    options
+}
+
+pub(crate) fn legend_value(legend: Option<&Legend>) -> Value {
+    let legend = legend.cloned().unwrap_or_default();
+    let (show, display_mode) = match legend.mode {
+        LegendMode::List => (true, "list"),
+        LegendMode::Table => (true, "table"),
+        LegendMode::Hidden => (false, "list"),
+    };
+    json!({
+        "showLegend": show,
+        "displayMode": display_mode,
+        "placement": match legend.placement {
+            crate::LegendPlacement::Bottom => "bottom",
+            crate::LegendPlacement::Right => "right",
+        },
+        "calcs": legend
+            .calculations
+            .into_iter()
+            .map(|calculation| calculation.as_grafana())
+            .collect::<Vec<_>>(),
+    })
+}
