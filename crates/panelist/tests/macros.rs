@@ -95,3 +95,60 @@ fn macro_supports_all_panel_kinds_and_reusable_fragments() {
     assert!(json.contains("\"bargauge\""));
     assert!(json.contains("Fragment gauge"));
 }
+
+#[test]
+fn transform_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Routes";
+
+        table "Route performance" {
+            query: promql!("sum by (route) (rate(requests_total[5m]))") {
+                ref_id: "A";
+            }
+            query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(d_bucket[5m])))") {
+                ref_id: "D";
+            }
+
+            transform join_by_field("route");
+            transform organize {
+                rename "Value #A" => "RPS";
+                hide "Time";
+                order ["route", "RPS"];
+            }
+            transform sort_by("RPS", desc);
+            transform time_series_to_table { query "D": last; } only ref_id("D");
+            transform labels_to_fields { mode: columns; keep ["route"]; }
+        }
+    };
+
+    let from_builder = Dashboard::new("Routes").panel(
+        Table::new("Route performance")
+            .query(PrometheusQuery::new("sum by (route) (rate(requests_total[5m]))").ref_id("A"))
+            .query(
+                PrometheusQuery::new(
+                    "histogram_quantile(0.95, sum by (route, le) (rate(d_bucket[5m])))",
+                )
+                .ref_id("D"),
+            )
+            .transform(JoinByField::new("route"))
+            .transform(
+                OrganizeFields::new()
+                    .rename("Value #A", "RPS")
+                    .hide("Time")
+                    .order(["route", "RPS"]),
+            )
+            .transform(SortBy::desc("RPS"))
+            .transform(
+                TimeSeriesToTable::new()
+                    .query_with("D", Reducer::Last)
+                    .only_ref_id("D"),
+            )
+            .transform(LabelsToFields::new().keep(["route"])),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
