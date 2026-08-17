@@ -27,8 +27,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::{
-    ColorScheme, FieldConfig, FieldOverride, OverrideMatcher, OverrideProperty, PanelKind,
-    Stacking, ThresholdMode, Thresholds, panel::PanelOptions,
+    CellBackgroundMode, CellValueDisplay, ColorScheme, FieldConfig, FieldOverride, OverrideMatcher,
+    OverrideProperty, PanelKind, Stacking, TableCell, ThresholdMode, Thresholds,
+    panel::PanelOptions,
 };
 
 use super::vocabulary::{color, line_interpolation, point_visibility, stacking_mode, unit};
@@ -80,6 +81,9 @@ pub(crate) fn normalize_field_config(
 
     let mut custom = default_field_custom(kind);
     custom.extend(typed_field_custom(kind_options));
+    if let Some(cell) = &config.cell {
+        custom.insert("cellOptions".to_owned(), cell_options_value(cell));
+    }
     custom.extend(config.custom.clone());
     if !custom.is_empty() {
         defaults.insert("custom".to_owned(), json!(custom));
@@ -193,6 +197,10 @@ pub(crate) fn normalize_override(field_override: &FieldOverride) -> GrafanaField
                     id: "thresholds".to_owned(),
                     value: thresholds_value(value),
                 },
+                OverrideProperty::Cell(cell) => GrafanaOverrideProperty {
+                    id: "custom.cellOptions".to_owned(),
+                    value: cell_options_value(cell),
+                },
                 OverrideProperty::Custom { id, value } => GrafanaOverrideProperty {
                     id: id.clone(),
                     value: value.clone(),
@@ -261,4 +269,69 @@ pub(crate) fn thresholds_value(thresholds: &Thresholds) -> Value {
         },
         "steps": steps,
     })
+}
+
+// Cell option shapes follow Grafana's TableCellOptions union in
+// packages/grafana-schema/src/common/common.gen.ts. Sparkline cells extend
+// GraphFieldConfig, so line and fill properties sit directly on the object.
+pub(crate) fn cell_options_value(cell: &TableCell) -> Value {
+    let mut output = serde_json::Map::new();
+    match cell {
+        TableCell::Auto => {
+            output.insert("type".to_owned(), json!("auto"));
+        }
+        TableCell::ColoredText => {
+            output.insert("type".to_owned(), json!("color-text"));
+        }
+        TableCell::ColoredBackground(options) => {
+            output.insert("type".to_owned(), json!("color-background"));
+            if let Some(mode) = options.mode {
+                output.insert(
+                    "mode".to_owned(),
+                    json!(match mode {
+                        CellBackgroundMode::Basic => "basic",
+                        CellBackgroundMode::Gradient => "gradient",
+                    }),
+                );
+            }
+            if let Some(apply_to_row) = options.apply_to_row {
+                output.insert("applyToRow".to_owned(), json!(apply_to_row));
+            }
+            if let Some(wrap_text) = options.wrap_text {
+                output.insert("wrapText".to_owned(), json!(wrap_text));
+            }
+        }
+        TableCell::Gauge(options) => {
+            output.insert("type".to_owned(), json!("gauge"));
+            if let Some(mode) = options.mode {
+                output.insert(
+                    "mode".to_owned(),
+                    json!(super::vocabulary::bar_gauge_display_mode(mode)),
+                );
+            }
+            if let Some(display) = options.value_display {
+                output.insert(
+                    "valueDisplayMode".to_owned(),
+                    json!(match display {
+                        CellValueDisplay::Text => "text",
+                        CellValueDisplay::Color => "color",
+                        CellValueDisplay::Hidden => "hidden",
+                    }),
+                );
+            }
+        }
+        TableCell::Sparkline(options) => {
+            output.insert("type".to_owned(), json!("sparkline"));
+            if let Some(hide_value) = options.hide_value {
+                output.insert("hideValue".to_owned(), json!(hide_value));
+            }
+            if let Some(width) = options.line_width {
+                output.insert("lineWidth".to_owned(), json!(width));
+            }
+            if let Some(opacity) = options.fill_opacity {
+                output.insert("fillOpacity".to_owned(), json!(opacity));
+            }
+        }
+    }
+    Value::Object(output)
 }

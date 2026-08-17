@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::Reducer;
+use crate::{Reducer, TableCell, TableCellType};
 
 /// A Grafana field unit with common units represented as Rust variants.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -214,6 +214,7 @@ pub struct FieldConfig {
     pub(crate) color: Option<ColorScheme>,
     pub(crate) thresholds: Option<Thresholds>,
     pub(crate) mappings: Vec<ValueMapping>,
+    pub(crate) cell: Option<TableCell>,
     pub(crate) custom: BTreeMap<String, Value>,
     pub(crate) overrides: Vec<FieldOverride>,
 }
@@ -281,6 +282,13 @@ impl FieldConfig {
         self
     }
 
+    /// Sets the default table cell renderer.
+    #[must_use]
+    pub fn cell(mut self, cell: impl Into<TableCell>) -> Self {
+        self.cell = Some(cell.into());
+        self
+    }
+
     /// Adds a plugin-specific field default.
     ///
     /// This escape hatch is applied after every typed field-custom setter
@@ -332,6 +340,8 @@ pub enum OverrideProperty {
     LineWidth(u8),
     /// Override thresholds for the selected fields.
     Thresholds(Thresholds),
+    /// Override the table cell renderer.
+    Cell(TableCell),
     /// Explicit Grafana property escape hatch.
     Custom {
         /// Grafana field-property identifier.
@@ -399,6 +409,18 @@ impl FieldOverride {
     #[must_use]
     pub fn thresholds(self, thresholds: Thresholds) -> Self {
         self.property(OverrideProperty::Thresholds(thresholds))
+    }
+
+    /// Sets the table cell renderer for the selected fields.
+    #[must_use]
+    pub fn cell(self, cell: impl Into<TableCell>) -> Self {
+        self.property(OverrideProperty::Cell(cell.into()))
+    }
+
+    /// Sets the table cell renderer using its default options.
+    #[must_use]
+    pub fn cell_type(self, cell_type: TableCellType) -> Self {
+        self.cell(cell_type)
     }
 }
 

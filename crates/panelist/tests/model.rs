@@ -716,3 +716,69 @@ fn heatmap_format_serializes() {
         "heatmap"
     );
 }
+
+#[test]
+fn cell_types_serialize_through_field_overrides() {
+    let dashboard = Dashboard::new("Cells").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .override_field(
+                FieldOverride::by_name("Error rate").cell_type(TableCellType::ColoredBackground),
+            )
+            .override_field(FieldOverride::by_name("Trend").cell_type(TableCellType::Sparkline)),
+    );
+
+    let overrides = &as_value(&dashboard)["panels"][0]["fieldConfig"]["overrides"];
+    assert_eq!(
+        overrides[0]["properties"][0],
+        json!({"id": "custom.cellOptions", "value": {"type": "color-background"}})
+    );
+    assert_eq!(
+        overrides[1]["properties"][0]["value"],
+        json!({"type": "sparkline"})
+    );
+}
+
+#[test]
+fn cell_options_serialize_per_variant() {
+    let dashboard = Dashboard::new("Cell options").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .override_field(
+                FieldOverride::by_name("Error rate").cell(
+                    ColoredBackgroundCell::new()
+                        .mode(CellBackgroundMode::Gradient)
+                        .apply_to_row(true),
+                ),
+            )
+            .override_field(
+                FieldOverride::by_name("Load").cell(
+                    GaugeCell::new()
+                        .mode(BarGaugeDisplayMode::Lcd)
+                        .value_display(CellValueDisplay::Color),
+                ),
+            )
+            .override_field(
+                FieldOverride::by_name("Trend").cell(
+                    SparklineCell::new()
+                        .hide_value(true)
+                        .line_width(2.0)
+                        .fill_opacity(20.0),
+                ),
+            ),
+    );
+
+    let overrides = &as_value(&dashboard)["panels"][0]["fieldConfig"]["overrides"];
+    assert_eq!(
+        overrides[0]["properties"][0]["value"],
+        json!({"type": "color-background", "mode": "gradient", "applyToRow": true})
+    );
+    assert_eq!(
+        overrides[1]["properties"][0]["value"],
+        json!({"type": "gauge", "mode": "lcd", "valueDisplayMode": "color"})
+    );
+    assert_eq!(
+        overrides[2]["properties"][0]["value"],
+        json!({"type": "sparkline", "hideValue": true, "lineWidth": 2.0, "fillOpacity": 20.0})
+    );
+}
