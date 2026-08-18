@@ -148,7 +148,15 @@ fn main() -> panelist::Result<()> {
                     rename "Value #E" => "p50";
                     rename "Value #F" => "p95";
                     rename "Value #G" => "p99";
-                    rename "Value #H" => "Trend";
+                    // `timeSeriesTable` names its synthesized trend field
+                    // `Trend #<refId>` directly — it never goes through the
+                    // `Value` -> `Value #<refId>` substitution `joinByField`
+                    // applies to plain Prometheus table-format results (that
+                    // substitution only fires for fields literally named
+                    // `Value`). Renaming from `Value #H` here would be a
+                    // silent no-op, so this one differs from the other seven
+                    // renames on purpose — do not "fix" it back to match them.
+                    rename "Trend #H" => "Trend";
                     hide "Time";
                     order ["route", "RPS", "4xx rate", "5xx rate", "error %", "p50", "p95", "p99", "Trend"];
                 }

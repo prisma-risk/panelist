@@ -517,14 +517,14 @@
               "route": 0
             },
             "renameByName": {
+              "Trend #H": "Trend",
               "Value #A": "RPS",
               "Value #B": "4xx rate",
               "Value #C": "5xx rate",
               "Value #D": "error %",
               "Value #E": "p50",
               "Value #F": "p95",
-              "Value #G": "p99",
-              "Value #H": "Trend"
+              "Value #G": "p99"
             }
           }
         }

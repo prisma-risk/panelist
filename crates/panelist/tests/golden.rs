@@ -206,7 +206,15 @@ fn route_performance_dashboard() -> Dashboard {
                     rename "Value #E" => "p50";
                     rename "Value #F" => "p95";
                     rename "Value #G" => "p99";
-                    rename "Value #H" => "Trend";
+                    // `timeSeriesTable` names its synthesized trend field
+                    // `Trend #<refId>` directly — it never goes through the
+                    // `Value` -> `Value #<refId>` substitution `joinByField`
+                    // applies to plain Prometheus table-format results (that
+                    // substitution only fires for fields literally named
+                    // `Value`). Renaming from `Value #H` here would be a
+                    // silent no-op, so this one differs from the other seven
+                    // renames on purpose — do not "fix" it back to match them.
+                    rename "Trend #H" => "Trend";
                     hide "Time";
                     order ["route", "RPS", "4xx rate", "5xx rate", "error %", "p50", "p95", "p99", "Trend"];
                 }
@@ -353,6 +361,7 @@ fn assert_no_raw_escape_hatches(label: &str, source: &str) {
         ".option(",  // builder: .option("key", json!(…))
         "extra \"",  // DSL:     extra "key": value;
         ".extra(",   // builder: .extra("key", json!(…))
+        ".custom(",  // builder: FieldConfig::custom("key", json!(…))
         "RawPanel",
         "RawQuery",
         "RawTransformation",
