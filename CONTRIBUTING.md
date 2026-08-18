@@ -47,10 +47,16 @@ cargo test -p panelist --test macros
 cargo test -p panelist --test golden
 cargo run -p panelist --example full_dashboard
 make verify-grafana  # needs Docker: round-trips the goldens through a real Grafana
+make demo            # needs Docker: serves every example on a live Grafana
 ```
 
 Set `UPDATE_GOLDEN=1` when an intentional wire-format change requires updating
 the committed golden dashboard, then review the JSON diff before committing.
+
+A change that alters what an example renders should ship a refreshed
+screenshot: `make render-examples` regenerates every image in
+[`examples/images`](examples/images) from the examples themselves, and
+`make demo-down` stops the stack afterwards.
 
 ## Tests and documentation
 
