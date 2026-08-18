@@ -68,23 +68,42 @@ valid JSON, not that Grafana kept what was in it. So for each golden,
 
 1. `POST /api/dashboards/db` the golden JSON with `overwrite: true`.
 2. `GET /api/dashboards/uid/<uid>` it straight back.
-3. Walks every leaf of the posted document and asserts it is still present,
-   with the same value, at the same path in the returned document. Additions
-   are ignored automatically (the walk only visits paths the posted document
-   has). The only rewrites ignored are the ones Grafana is documented to make
-   on every save: the top-level `id`, `version`, and `uid`, and each panel's
-   `pluginVersion`. Anything else missing or changed is reported as a dropped
-   or altered property, with its JSON path.
+3. Walks the posted document in two categories, checked to different
+   standards:
+   - Every **leaf** — every value that is not itself an object or array,
+     including `null` and `false` — must still be present, with the same
+     value, at the same path in the returned document.
+   - Every **empty container** (`{}` or `[]` in the posted document) must
+     still be present as the same container type (object stays an object,
+     array stays an array), but its *value* is not compared. Grafana
+     routinely adds entries into an empty container on save —
+     `annotations.list: []` picking up Grafana's built-in "Annotations &
+     Alerts" entry is a documented case — and that addition is exactly the
+     kind this check already ignores everywhere else, so comparing values
+     here would misreport a legitimate addition as a drop.
 
-Both goldens round-tripped with **zero dropped or altered properties**:
+   Additions elsewhere are ignored automatically in both categories (the
+   walk only visits paths the posted document has). The only rewrites
+   ignored are the ones Grafana is documented to make on every save: the
+   top-level `id`, `version`, and `uid`, and each panel's `pluginVersion`.
+   Anything else missing, value-altered (a leaf), or retyped (a container)
+   is reported with its JSON path.
+
+Both goldens round-tripped with **zero dropped, altered, or retyped
+properties**:
 
 - [`basic.json`](../crates/panelist/tests/golden/basic.json) (uid
-  `golden-service`, 84 leaf properties checked) — rows, stat and time-series
-  panels, thresholds, datasource references, a custom variable, and grid
-  positions all came back unchanged.
+  `golden-service`, 97 leaf properties and 6 empty containers checked) —
+  rows, stat and time-series panels, thresholds, datasource references, a
+  custom variable, and grid positions all came back unchanged, including
+  every `false`-valued `hide` flag on a query target, every `collapsed`
+  flag on a row, and every empty container (`timepicker`, `annotations.list`,
+  `links`, the time-series panel's empty `options.legend.calcs`, and both
+  panels' empty `fieldConfig.overrides` arrays).
 - [`route_performance.json`](../crates/panelist/tests/golden/route_performance.json)
-  (uid `route-performance`, 430 leaf properties checked) — the acceptance
-  dashboard for the whole typed-transformations effort. Confirmed preserved:
+  (uid `route-performance`, 483 leaf properties and 18 empty containers
+  checked) — the acceptance dashboard for the whole typed-transformations
+  effort. Confirmed preserved:
   panel transformations (`timeSeriesTable`, `joinByField`, and `organize`,
   chained on the table panel), typed table cell options
   (`color-background` and `sparkline` cell renderers, including the

@@ -46,7 +46,12 @@ panelist = "0.2"
 The minimum supported Rust version is 1.96. Panelist uses Rust 2024 and has no
 async runtime or network client dependency.
 
-### Breaking changes in 0.2
+### Breaking changes since 0.2
+
+The following have landed since the 0.2.0 release and are not yet part of
+any published version; they will be reflected in the next release's number
+per [semver](https://semver.org/) and the project's
+[release process](CONTRIBUTING.md#releases).
 
 - `LegendCalculation` was renamed to `Reducer`. Grafana calls this vocabulary
   `ReducerID`, and Panelist already used it outside legends for
@@ -59,6 +64,10 @@ async runtime or network client dependency.
   `PanelBuilder<TableKind>::cell` instead, which now stores it as typed table
   options so it survives a later `.field_config()` call the way `.sort_by()`
   already did.
+- `TableSort` and `TransformationFilter` narrowed from `pub` to `pub(crate)`
+  and were removed from the prelude. Neither type was ever constructible or
+  acceptable as a parameter from outside the crate, so no external caller
+  should notice.
 
 ## Macro DSL
 
