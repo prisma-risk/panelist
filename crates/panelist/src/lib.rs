@@ -119,7 +119,7 @@ pub mod prelude {
         Stacking, StackingMode, Stat, StatColorMode, StatGraphMode, Table, TableCell,
         TableCellType, Text, TextMode, ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable,
         Timeseries, Tooltip, TooltipMode, TooltipSort, Transformation, Unit, ValueMapping,
-        Variable, VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query,
-        prometheus, promql,
+        Variable, VariableBuilder, VariableRefresh, VariableSelection, VariableSort, dashboard,
+        loki, loki_query, prometheus, promql,
     };
 }

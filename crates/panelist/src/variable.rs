@@ -335,6 +335,10 @@ pub struct CustomVariable {
     pub(crate) allow_custom_value: bool,
     pub(crate) skip_url_sync: bool,
     pub(crate) hidden: bool,
+    /// Options set on the builder that this kind has no Grafana key
+    /// for. Never serialized; validation reports them so they cannot be
+    /// dropped silently.
+    pub(crate) inapplicable: Vec<&'static str>,
 }
 
 impl CustomVariable {
@@ -345,6 +349,7 @@ impl CustomVariable {
         values: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         Self {
+            inapplicable: Vec::new(),
             name: name.into(),
             label: None,
             values: values.into_iter().map(Into::into).collect(),
@@ -430,6 +435,10 @@ pub struct ConstantVariable {
     pub(crate) label: Option<String>,
     pub(crate) value: String,
     pub(crate) hidden: bool,
+    /// Options set on the builder that this kind has no Grafana key
+    /// for. Never serialized; validation reports them so they cannot be
+    /// dropped silently.
+    pub(crate) inapplicable: Vec<&'static str>,
 }
 
 impl ConstantVariable {
@@ -437,6 +446,7 @@ impl ConstantVariable {
     #[must_use]
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
+            inapplicable: Vec::new(),
             name: name.into(),
             label: None,
             value: value.into(),
@@ -525,6 +535,12 @@ pub struct VariableBuilder {
     include_all: bool,
     hidden: bool,
     refresh: VariableRefresh,
+    regex: Option<String>,
+    sort: Option<VariableSort>,
+    all_value: Option<String>,
+    allow_custom_value: bool,
+    skip_url_sync: bool,
+    current: Option<VariableSelection>,
 }
 
 impl VariableBuilder {
@@ -543,6 +559,12 @@ impl VariableBuilder {
             include_all: false,
             hidden: false,
             refresh: VariableRefresh::OnDashboardLoad,
+            regex: None,
+            sort: None,
+            all_value: None,
+            allow_custom_value: false,
+            skip_url_sync: false,
+            current: None,
         }
     }
 
@@ -616,15 +638,77 @@ impl VariableBuilder {
         self
     }
 
+    /// Restricts a query or datasource variable's values with a regex.
+    ///
+    /// Custom and constant variables have no `regex` key in Grafana, so
+    /// setting this on one is an authoring mistake rather than a no-op, and
+    /// validation reports it.
+    #[must_use]
+    pub fn regex(mut self, regex: impl Into<String>) -> Self {
+        self.regex = Some(regex.into());
+        self
+    }
+
+    /// Orders a query variable's values.
+    ///
+    /// Reported by validation on kinds with no `sort` key, same as
+    /// [`Self::regex`].
+    #[must_use]
+    pub fn sort(mut self, sort: VariableSort) -> Self {
+        self.sort = Some(sort);
+        self
+    }
+
+    /// Sets the value substituted when "All" is selected.
+    #[must_use]
+    pub fn all_value(mut self, all_value: impl Into<String>) -> Self {
+        self.all_value = Some(all_value.into());
+        self
+    }
+
+    /// Allows values typed by the viewer that the query did not return.
+    #[must_use]
+    pub fn allow_custom_value(mut self, allow_custom_value: bool) -> Self {
+        self.allow_custom_value = allow_custom_value;
+        self
+    }
+
+    /// Keeps the variable's value out of the dashboard URL.
+    #[must_use]
+    pub fn skip_url_sync(mut self, skip_url_sync: bool) -> Self {
+        self.skip_url_sync = skip_url_sync;
+        self
+    }
+
+    /// Sets the initially selected value, overriding [`Self::default`].
+    #[must_use]
+    pub fn current(mut self, current: VariableSelection) -> Self {
+        self.current = Some(current);
+        self
+    }
+
     /// Produces the selected typed variable. If no selector was supplied, an
     /// empty custom variable is emitted so validation and Grafana can surface
     /// the incomplete definition without a macro panic.
     #[must_use]
     pub fn build(self) -> Variable {
+        // Recorded before the kind is resolved, so a `regex`/`sort` set on a
+        // builder that turns out to be custom or constant is reported by
+        // validation instead of vanishing. Grafana emits no such key for
+        // those kinds, so there is nothing to lower them onto.
+        let mut inapplicable = Vec::new();
+        if self.regex.is_some() {
+            inapplicable.push("regex");
+        }
+        if self.sort.is_some() {
+            inapplicable.push("sort");
+        }
         if let Some(query) = self.query {
-            let current = self
-                .default
-                .map(|value| VariableSelection::new(value.clone(), value));
+            let current = self.current.clone().or_else(|| {
+                self.default
+                    .clone()
+                    .map(|value| VariableSelection::new(value.clone(), value))
+            });
             Variable::Query(Box::new(QueryVariable {
                 name: self.name,
                 label: self.label,
@@ -633,35 +717,43 @@ impl VariableBuilder {
                 datasource: self.datasource,
                 multi: self.multi,
                 include_all: self.include_all,
-                all_value: None,
-                allow_custom_value: false,
-                skip_url_sync: false,
-                regex: String::new(),
-                sort: VariableSort::AlphabeticalAscending,
+                all_value: self.all_value,
+                allow_custom_value: self.allow_custom_value,
+                skip_url_sync: self.skip_url_sync,
+                regex: self.regex.unwrap_or_default(),
+                // Deliberately not `VariableSort::default()` (Disabled): this
+                // builder has always defaulted query variables to
+                // alphabetical, and switching now would silently reorder the
+                // values in every existing dashboard.
+                sort: self.sort.unwrap_or(VariableSort::AlphabeticalAscending),
                 hidden: self.hidden,
                 refresh: self.refresh,
             }))
         } else if let Some(value) = self.constant {
             Variable::Constant(ConstantVariable {
+                inapplicable,
                 name: self.name,
                 label: self.label,
                 value,
                 hidden: self.hidden,
             })
         } else {
-            let current = self
-                .default
-                .map(|value| VariableSelection::new(value.clone(), value));
+            let current = self.current.clone().or_else(|| {
+                self.default
+                    .clone()
+                    .map(|value| VariableSelection::new(value.clone(), value))
+            });
             Variable::Custom(CustomVariable {
+                inapplicable,
                 name: self.name,
                 label: self.label,
                 values: self.values,
                 current,
                 multi: self.multi,
                 include_all: self.include_all,
-                all_value: None,
-                allow_custom_value: false,
-                skip_url_sync: false,
+                all_value: self.all_value,
+                allow_custom_value: self.allow_custom_value,
+                skip_url_sync: self.skip_url_sync,
                 hidden: self.hidden,
             })
         }

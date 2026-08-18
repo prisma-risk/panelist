@@ -108,6 +108,24 @@ macro_rules! __panelist_dashboard_items {
         $dashboard = $dashboard.datasource($datasource);
         $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
     };
+    ($dashboard:ident; cursor_sync: $sync:ident; $($rest:tt)*) => {
+        $dashboard = $dashboard.cursor_sync($crate::__panelist_cursor_sync!($sync));
+        $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
+    };
+    // Block form first: an arm ending in `{ $($body:tt)* } $($rest:tt)*` has
+    // no literal separator to anchor on, so ordering is what keeps the `;`
+    // form from shadowing it. Same grammar and same item macro as the
+    // panel-level `link`, so the two read identically.
+    ($dashboard:ident; link $title:literal => $url:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_link = $crate::DashboardLink::new($title, $url);
+        $crate::__panelist_link_items!(__panelist_link; $($body)*);
+        $dashboard = $dashboard.link(__panelist_link);
+        $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
+    };
+    ($dashboard:ident; link $title:literal => $url:literal; $($rest:tt)*) => {
+        $dashboard = $dashboard.link($crate::DashboardLink::new($title, $url));
+        $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
+    };
     ($dashboard:ident; panels: $panels:expr; $($rest:tt)*) => {
         $dashboard = $dashboard.panels($panels);
         $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
@@ -750,11 +768,11 @@ macro_rules! __panelist_tooltip_items {
         $tooltip = $tooltip.sort($crate::TooltipSort::None);
         $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
     };
-    ($tooltip:ident; sort: ascending; $($rest:tt)*) => {
+    ($tooltip:ident; sort: asc; $($rest:tt)*) => {
         $tooltip = $tooltip.sort($crate::TooltipSort::Ascending);
         $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
     };
-    ($tooltip:ident; sort: descending; $($rest:tt)*) => {
+    ($tooltip:ident; sort: desc; $($rest:tt)*) => {
         $tooltip = $tooltip.sort($crate::TooltipSort::Descending);
         $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
     };
@@ -815,6 +833,56 @@ macro_rules! __panelist_link_items {
     ($link:ident; tags: [$($tag:expr),* $(,)?]; $($rest:tt)*) => {
         $link = $link.tags([$($tag),*]);
         $crate::__panelist_link_items!($link; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_cursor_sync {
+    (off) => {
+        $crate::DashboardCursorSync::Off
+    };
+    (crosshair) => {
+        $crate::DashboardCursorSync::Crosshair
+    };
+    (tooltip) => {
+        $crate::DashboardCursorSync::Tooltip
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_variable_sort {
+    (disabled) => {
+        $crate::VariableSort::Disabled
+    };
+    (alphabetical_asc) => {
+        $crate::VariableSort::AlphabeticalAscending
+    };
+    (alphabetical_desc) => {
+        $crate::VariableSort::AlphabeticalDescending
+    };
+    (numerical_asc) => {
+        $crate::VariableSort::NumericalAscending
+    };
+    (numerical_desc) => {
+        $crate::VariableSort::NumericalDescending
+    };
+    (alphabetical_case_insensitive_asc) => {
+        $crate::VariableSort::AlphabeticalCaseInsensitiveAscending
+    };
+    (alphabetical_case_insensitive_desc) => {
+        $crate::VariableSort::AlphabeticalCaseInsensitiveDescending
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_selection_items {
+    ($selection:ident;) => {};
+    ($selection:ident; selected: $selected:expr; $($rest:tt)*) => {
+        $selection = $selection.selected($selected);
+        $crate::__panelist_selection_items!($selection; $($rest)*);
     };
 }
 
@@ -1129,6 +1197,36 @@ macro_rules! __panelist_variable_items {
     };
     ($variable:ident; hidden: $hidden:expr; $($rest:tt)*) => {
         $variable = $variable.hidden($hidden);
+        $crate::__panelist_variable_items!($variable; $($rest)*);
+    };
+    ($variable:ident; regex: $regex:expr; $($rest:tt)*) => {
+        $variable = $variable.regex($regex);
+        $crate::__panelist_variable_items!($variable; $($rest)*);
+    };
+    ($variable:ident; all_value: $all_value:expr; $($rest:tt)*) => {
+        $variable = $variable.all_value($all_value);
+        $crate::__panelist_variable_items!($variable; $($rest)*);
+    };
+    ($variable:ident; allow_custom_value: $allow:expr; $($rest:tt)*) => {
+        $variable = $variable.allow_custom_value($allow);
+        $crate::__panelist_variable_items!($variable; $($rest)*);
+    };
+    ($variable:ident; skip_url_sync: $skip:expr; $($rest:tt)*) => {
+        $variable = $variable.skip_url_sync($skip);
+        $crate::__panelist_variable_items!($variable; $($rest)*);
+    };
+    ($variable:ident; sort: $sort:ident; $($rest:tt)*) => {
+        $variable = $variable.sort($crate::__panelist_variable_sort!($sort));
+        $crate::__panelist_variable_items!($variable; $($rest)*);
+    };
+    ($variable:ident; current $text:literal => $value:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_selection = $crate::VariableSelection::new($text, $value);
+        $crate::__panelist_selection_items!(__panelist_selection; $($body)*);
+        $variable = $variable.current(__panelist_selection);
+        $crate::__panelist_variable_items!($variable; $($rest)*);
+    };
+    ($variable:ident; current $text:literal => $value:literal; $($rest:tt)*) => {
+        $variable = $variable.current($crate::VariableSelection::new($text, $value));
         $crate::__panelist_variable_items!($variable; $($rest)*);
     };
     ($variable:ident; refresh: never; $($rest:tt)*) => {

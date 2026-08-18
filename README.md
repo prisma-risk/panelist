@@ -123,6 +123,38 @@ and `heatmap` panels, and every one of the seven now works identically at
 both dashboard level and row level. `promql!` and `loki!` create typed query
 builders rather than opaque JSON values.
 
+Dashboard links, cursor sync, and the full variable surface are reachable
+too:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "API";
+    cursor_sync: crosshair;
+
+    link "Runbook" => "https://runbook.internal/api" {
+        target_blank: true;
+        tags: ["ops"];
+    }
+
+    variable "instance" {
+        query: promql!("label_values(up, instance)");
+        regex: "prod-.*";
+        sort: alphabetical_asc;
+        all_value: ".*";
+        allow_custom_value: true;
+        skip_url_sync: true;
+        current "Production" => "prod";
+    }
+};
+# let _ = dashboard;
+```
+
+`regex` and `sort` have no Grafana key on a custom or constant variable.
+Setting them there is a validation error rather than a silent no-op, because
+an ignored `sort` and a working one look identical in the emitted JSON.
+
 Every typed panel option is reachable from the DSL. There is no option that
 requires dropping to `option "key": json!(…)`:
 
@@ -143,7 +175,7 @@ let dashboard = dashboard! {
 
         tooltip {
             mode: multi;
-            sort: descending;
+            sort: desc;
         }
     }
 
