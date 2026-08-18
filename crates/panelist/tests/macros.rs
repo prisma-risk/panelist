@@ -381,6 +381,125 @@ fn table_override_matchers_and_properties_dsl_matches_the_builder_model() {
 }
 
 #[test]
+fn heatmap_dsl_and_top_level_panels_match_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Latency";
+
+        table "Top level table" {}
+
+        heatmap "Latency distribution" {
+            query: promql!("sum by (le) (rate(duration_bucket[5m]))") {
+                format: heatmap;
+            }
+            unit: seconds;
+            color_scheme: "Blues";
+            color_steps: 32;
+            cell_gap: 2;
+            calculate: false;
+            show_legend: true;
+
+            y_axis {
+                unit: seconds;
+                placement: left;
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Latency")
+        .panel(Table::new("Top level table"))
+        .panel(
+            Heatmap::new("Latency distribution")
+                .query(
+                    PrometheusQuery::new("sum by (le) (rate(duration_bucket[5m]))")
+                        .format(PrometheusFormat::Heatmap),
+                )
+                .unit(Unit::Seconds)
+                .color_scheme("Blues")
+                .color_steps(32)
+                .cell_gap(2)
+                .calculate(false)
+                .show_legend(true)
+                .y_axis_unit(Unit::Seconds)
+                .y_axis_placement(AxisPlacement::Left),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
+fn heatmap_dsl_covers_format_color_mode_and_axis_placement_variants() {
+    // `heatmap_dsl_and_top_level_panels_match_the_builder_model` above only
+    // exercises `format: heatmap;`, `color_mode`'s default-masking-unsafe-if-
+    // untested `scheme` case is skipped there entirely, `y_axis { unit: … }`
+    // only exercises the bare-ident unit form, and `placement: left;` is the
+    // only one of `__panelist_axis_placement!`'s six arms it reaches. This
+    // test rounds out every remaining `format:`, `color_mode:`, y-axis-unit,
+    // and axis-placement arm so each new rule has DSL-vs-builder coverage.
+    let from_macro = dashboard! {
+        title: "Heatmap variants";
+
+        heatmap "Time series format" {
+            query: promql!("a") { format: time_series; }
+        }
+        heatmap "Table format" {
+            query: promql!("b") { format: table; }
+        }
+        heatmap "Scheme color mode" {
+            color_mode: scheme;
+        }
+        heatmap "Opacity color mode" {
+            color_mode: opacity;
+        }
+        heatmap "Custom y axis unit" {
+            y_axis { unit: custom("widgets"); }
+        }
+        heatmap "Auto placement" {
+            y_axis { placement: auto; }
+        }
+        heatmap "Bottom placement" {
+            y_axis { placement: bottom; }
+        }
+        heatmap "Hidden placement" {
+            y_axis { placement: hidden; }
+        }
+        heatmap "Right placement" {
+            y_axis { placement: right; }
+        }
+        heatmap "Top placement" {
+            y_axis { placement: top; }
+        }
+    };
+
+    let from_builder = Dashboard::new("Heatmap variants")
+        .panel(
+            Heatmap::new("Time series format")
+                .query(PrometheusQuery::new("a").format(PrometheusFormat::TimeSeries)),
+        )
+        .panel(
+            Heatmap::new("Table format")
+                .query(PrometheusQuery::new("b").format(PrometheusFormat::Table)),
+        )
+        .panel(Heatmap::new("Scheme color mode").color_mode(HeatmapColorMode::Scheme))
+        .panel(Heatmap::new("Opacity color mode").color_mode(HeatmapColorMode::Opacity))
+        .panel(Heatmap::new("Custom y axis unit").y_axis_unit(Unit::Custom("widgets".to_owned())))
+        .panel(Heatmap::new("Auto placement").y_axis_placement(AxisPlacement::Auto))
+        .panel(Heatmap::new("Bottom placement").y_axis_placement(AxisPlacement::Bottom))
+        .panel(Heatmap::new("Hidden placement").y_axis_placement(AxisPlacement::Hidden))
+        .panel(Heatmap::new("Right placement").y_axis_placement(AxisPlacement::Right))
+        .panel(Heatmap::new("Top placement").y_axis_placement(AxisPlacement::Top));
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
 fn table_panel_default_cell_and_remaining_cell_variants_dsl_matches_the_builder_model() {
     let from_macro = dashboard! {
         title: "Cell defaults";

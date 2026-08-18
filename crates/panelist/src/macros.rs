@@ -51,6 +51,16 @@ macro_rules! loki {
 /// The macro deliberately contains no control flow: use normal Rust functions,
 /// iterators, and conditionals to create reusable `Vec<Panel>` fragments, then
 /// insert them with `panels: fragment;`.
+///
+/// The panel body grammar (`legend { … }`, `cell:`, `sort_by:`, the heatmap
+/// options, and so on) is one shared rule set across every panel kind, and
+/// `format:` inside a query block is one shared rule set across every query
+/// kind. Rules that only make sense for one concrete type — for example
+/// `format:` outside `promql!(…) { … }`, or the heatmap rules on a panel kind
+/// other than `heatmap`— are still syntactically accepted, and only rejected
+/// when the expansion calls a builder method that type doesn't have. Such
+/// mistakes surface as a compile error pointing into the macro expansion
+/// rather than at the offending line in your `dashboard!` block.
 #[macro_export]
 macro_rules! dashboard {
     (title: $title:expr; $($body:tt)*) => {{
@@ -455,6 +465,38 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.cell($crate::__panelist_cell_type!($cell));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    ($panel:ident; color_scheme: $scheme:expr; $($rest:tt)*) => {
+        $panel = $panel.color_scheme($scheme);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color_steps: $steps:expr; $($rest:tt)*) => {
+        $panel = $panel.color_steps($steps);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color_mode: scheme; $($rest:tt)*) => {
+        $panel = $panel.color_mode($crate::HeatmapColorMode::Scheme);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color_mode: opacity; $($rest:tt)*) => {
+        $panel = $panel.color_mode($crate::HeatmapColorMode::Opacity);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; cell_gap: $gap:expr; $($rest:tt)*) => {
+        $panel = $panel.cell_gap($gap);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; show_legend: $show:expr; $($rest:tt)*) => {
+        $panel = $panel.show_legend($show);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; calculate: $calculate:expr; $($rest:tt)*) => {
+        $panel = $panel.calculate($calculate);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; y_axis { $($body:tt)* } $($rest:tt)*) => {
+        $crate::__panelist_y_axis_items!($panel; $($body)*);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; option $key:literal: $value:expr; $($rest:tt)*) => {
         $panel = $panel.option($key, $crate::__private::serde_json::json!($value));
         $crate::__panelist_panel_items!($panel; $($rest)*);
@@ -462,6 +504,47 @@ macro_rules! __panelist_panel_items {
     ($panel:ident; extra $key:literal: $value:expr; $($rest:tt)*) => {
         $panel = $panel.extra($key, $crate::__private::serde_json::json!($value));
         $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_y_axis_items {
+    ($panel:ident;) => {};
+    ($panel:ident; unit: custom($unit:expr); $($rest:tt)*) => {
+        $panel = $panel.y_axis_unit($crate::Unit::Custom(($unit).into()));
+        $crate::__panelist_y_axis_items!($panel; $($rest)*);
+    };
+    ($panel:ident; unit: $unit:ident; $($rest:tt)*) => {
+        $panel = $panel.y_axis_unit($crate::__panelist_unit!($unit));
+        $crate::__panelist_y_axis_items!($panel; $($rest)*);
+    };
+    ($panel:ident; placement: $placement:ident; $($rest:tt)*) => {
+        $panel = $panel.y_axis_placement($crate::__panelist_axis_placement!($placement));
+        $crate::__panelist_y_axis_items!($panel; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_axis_placement {
+    (auto) => {
+        $crate::AxisPlacement::Auto
+    };
+    (bottom) => {
+        $crate::AxisPlacement::Bottom
+    };
+    (hidden) => {
+        $crate::AxisPlacement::Hidden
+    };
+    (left) => {
+        $crate::AxisPlacement::Left
+    };
+    (right) => {
+        $crate::AxisPlacement::Right
+    };
+    (top) => {
+        $crate::AxisPlacement::Top
     };
 }
 
@@ -495,6 +578,18 @@ macro_rules! __panelist_query_items {
     };
     ($query:ident; interval: $interval:expr; $($rest:tt)*) => {
         $query = $query.interval($interval);
+        $crate::__panelist_query_items!($query; $($rest)*);
+    };
+    ($query:ident; format: time_series; $($rest:tt)*) => {
+        $query = $query.format($crate::PrometheusFormat::TimeSeries);
+        $crate::__panelist_query_items!($query; $($rest)*);
+    };
+    ($query:ident; format: table; $($rest:tt)*) => {
+        $query = $query.format($crate::PrometheusFormat::Table);
+        $crate::__panelist_query_items!($query; $($rest)*);
+    };
+    ($query:ident; format: heatmap; $($rest:tt)*) => {
+        $query = $query.format($crate::PrometheusFormat::Heatmap);
         $crate::__panelist_query_items!($query; $($rest)*);
     };
 }
