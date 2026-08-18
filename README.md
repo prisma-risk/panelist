@@ -123,6 +123,56 @@ and `heatmap` panels, and every one of the seven now works identically at
 both dashboard level and row level. `promql!` and `loki!` create typed query
 builders rather than opaque JSON values.
 
+Every typed panel option is reachable from the DSL. There is no option that
+requires dropping to `option "key": json!(…)`:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "Options";
+    datasource: prometheus("prometheus-main");
+
+    timeseries "Latency" {
+        query: promql!("latency");
+        fill_opacity: 30.0;
+        line_width: 2.0;
+        line_interpolation: smooth;
+        show_points: never;
+        span_nulls: true;
+
+        tooltip {
+            mode: multi;
+            sort: descending;
+        }
+    }
+
+    stat "Status" {
+        query: promql!("up");
+        color_mode: background;
+        color: fixed(red);
+
+        mapping "0" => "Down";
+        mapping "1" => "Up" { color: green; }
+
+        link "Runbook" => "https://runbook.internal/api" {
+            target_blank: true;
+        }
+
+        reduce {
+            calculations: [mean, max];
+            fields: "/.*/";
+        }
+    }
+};
+# let _ = dashboard;
+```
+
+`color_mode` is shared between stat and heatmap panels and takes a different
+vocabulary on each — `value`/`background`/`none` versus `scheme`/`opacity`.
+The two sets are disjoint, so the right one is selected by what you write, and
+pairing a panel kind with the wrong vocabulary is a compile error.
+
 Table panels can transform, sort, and style their columns without leaving
 the DSL:
 

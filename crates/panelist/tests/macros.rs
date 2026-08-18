@@ -820,3 +820,183 @@ fn panel_option_dsl_emits_the_grafana_wire_values() {
     );
     assert_eq!(json["panels"][1]["options"]["displayMode"], json!("lcd"));
 }
+
+/// Closes the DSL-parity gaps tracked in issue #8.
+///
+/// Every enum value here is deliberately NOT the type's `#[default]`:
+/// `LineInterpolation::Linear`, `PointVisibility::Auto`, `StatColorMode::Value`,
+/// `TooltipMode::Single` and `TooltipSort::None` are the defaults, and this
+/// assertion cannot see a DSL arm that silently does nothing when the value it
+/// would have set is what the field already holds.
+#[test]
+fn panel_option_parity_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Parity";
+
+        timeseries "Latency" {
+            query: promql!("latency");
+            fill_opacity: 30.0;
+            line_width: 3.0;
+            point_size: 7.0;
+            span_nulls: true;
+            line_interpolation: step_after;
+            show_points: never;
+            tooltip { mode: multi; sort: descending; hide_zeros: true; }
+        }
+
+        stat "Status" {
+            query: promql!("up");
+            color_mode: background;
+            wide_layout: true;
+            color: fixed(red);
+            mapping "0" => "Down";
+            mapping "1" => "Up" { color: green; }
+            link "Runbook" => "https://runbook";
+            link "Dashboard" => "https://dash" { target_blank: true; tags: ["ops"]; }
+            reduce { values: true; calculations: [mean, max]; fields: "/.*/"; }
+        }
+
+        gauge "Saturation" {
+            query: promql!("saturation");
+            color: continuous("BlYlRd");
+            reduce { values: false; }
+        }
+
+        bar_gauge "Routes" {
+            query: promql!("routes");
+            color: classic_palette;
+            reduce { fields: "/route/"; }
+        }
+    };
+
+    let from_builder = Dashboard::new("Parity")
+        .panel(
+            Timeseries::new("Latency")
+                .query(PrometheusQuery::new("latency"))
+                .fill_opacity(30.0)
+                .line_width(3.0)
+                .point_size(7.0)
+                .span_nulls(true)
+                .line_interpolation(LineInterpolation::StepAfter)
+                .show_points(PointVisibility::Never)
+                .tooltip(
+                    Tooltip::new()
+                        .mode(TooltipMode::Multi)
+                        .sort(TooltipSort::Descending)
+                        .hide_zeros(true),
+                ),
+        )
+        .panel(
+            Stat::new("Status")
+                .query(PrometheusQuery::new("up"))
+                .color_mode(StatColorMode::Background)
+                .wide_layout(true)
+                .color(ColorScheme::Fixed(Color::Red))
+                .mapping(ValueMapping::new("0", "Down"))
+                .mapping(ValueMapping::new("1", "Up").color(Color::Green))
+                .link(DashboardLink::new("Runbook", "https://runbook"))
+                .link(
+                    DashboardLink::new("Dashboard", "https://dash")
+                        .target_blank(true)
+                        .tags(["ops"]),
+                )
+                .reduce_options(
+                    ReduceOptions::new()
+                        .values(true)
+                        .calculations([Reducer::Mean, Reducer::Max])
+                        .fields("/.*/"),
+                ),
+        )
+        .panel(
+            Gauge::new("Saturation")
+                .query(PrometheusQuery::new("saturation"))
+                .color(ColorScheme::Continuous("BlYlRd".to_owned()))
+                .reduce_options(ReduceOptions::new().values(false)),
+        )
+        .panel(
+            BarGauge::new("Routes")
+                .query(PrometheusQuery::new("routes"))
+                .color(ColorScheme::ClassicPalette)
+                .reduce_options(ReduceOptions::new().fields("/route/")),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// Pins the emitted wire keys and value spellings. The parity test above only
+/// proves the two surfaces agree with each other, which stays true when both
+/// are wrong; this is the assertion that can disagree with both.
+#[test]
+fn panel_option_parity_emits_the_grafana_wire_values() {
+    let dashboard = dashboard! {
+        title: "Wire";
+
+        timeseries "Latency" {
+            query: promql!("latency");
+            fill_opacity: 30.0;
+            line_width: 3.0;
+            point_size: 7.0;
+            span_nulls: true;
+            line_interpolation: step_after;
+            show_points: never;
+            tooltip { mode: multi; sort: descending; hide_zeros: true; }
+        }
+
+        stat "Status" {
+            query: promql!("up");
+            color_mode: background;
+            wide_layout: true;
+            color: fixed(red);
+            mapping "1" => "Up" { color: green; }
+            link "Runbook" => "https://runbook" { target_blank: true; tags: ["ops"]; }
+            reduce { values: true; calculations: [mean, max]; fields: "/.*/"; }
+        }
+    };
+    let json: serde_json::Value = serde_json::from_str(&dashboard.to_json().unwrap()).unwrap();
+
+    let series = &json["panels"][0];
+    assert_eq!(
+        series["fieldConfig"]["defaults"]["custom"],
+        json!({
+            "drawStyle": "line",
+            "fillOpacity": 30.0,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 3.0,
+            "pointSize": 7.0,
+            "showPoints": "never",
+            "spanNulls": true
+        })
+    );
+    assert_eq!(
+        series["options"]["tooltip"],
+        json!({"hideZeros": true, "mode": "multi", "sort": "desc"})
+    );
+
+    let stat = &json["panels"][1];
+    assert_eq!(stat["options"]["colorMode"], json!("background"));
+    assert_eq!(stat["options"]["wideLayout"], json!(true));
+    assert_eq!(
+        stat["options"]["reduceOptions"],
+        json!({"calcs": ["mean", "max"], "fields": "/.*/", "values": true})
+    );
+    assert_eq!(
+        stat["fieldConfig"]["defaults"]["color"],
+        json!({"fixedColor": "red", "mode": "fixed"})
+    );
+    assert_eq!(
+        stat["fieldConfig"]["defaults"]["mappings"],
+        json!([{"options": {"1": {"color": "green", "text": "Up"}}, "type": "value"}])
+    );
+    assert_eq!(
+        stat["links"],
+        json!([{
+            "includeVars": false, "keepTime": false, "tags": ["ops"],
+            "targetBlank": true, "title": "Runbook", "type": "link",
+            "url": "https://runbook"
+        }])
+    );
+}
