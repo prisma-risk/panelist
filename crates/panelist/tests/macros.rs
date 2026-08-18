@@ -660,8 +660,7 @@ fn cell_option_blocks_dsl_matches_the_builder_model() {
     );
 }
 
-/// The transformation envelope — `only_frame_name`, `only_frame_index`, and
-/// `disabled` — has no dedicated `transform …` keyword form. It is reachable
+/// The transformation envelope — `only_frame_name` and `disabled` — has no dedicated `transform …` keyword form. It is reachable
 /// from the DSL through the typed-expression rule `transform: <expr>;`,
 /// which takes any `impl Into<Transformation>`. That is a first-class typed
 /// rule, not a raw-JSON escape hatch, so the two surfaces stay at parity;
@@ -675,7 +674,6 @@ fn transformation_envelope_dsl_matches_the_builder_model() {
             query: promql!("sum(a)") { ref_id: "A"; }
 
             transform: SortBy::desc("p95").only_frame_name("latency");
-            transform: JoinByField::new("route").only_frame_index(1);
             transform: LabelsToFields::new().disabled(true);
         }
     };
@@ -684,7 +682,6 @@ fn transformation_envelope_dsl_matches_the_builder_model() {
         Table::new("Filtered")
             .query(PrometheusQuery::new("sum(a)").ref_id("A"))
             .transform(SortBy::desc("p95").only_frame_name("latency"))
-            .transform(JoinByField::new("route").only_frame_index(1))
             .transform(LabelsToFields::new().disabled(true)),
     );
 

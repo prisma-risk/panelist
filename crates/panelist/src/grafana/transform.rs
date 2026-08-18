@@ -198,10 +198,38 @@ const fn labels_to_fields_mode(mode: LabelsToFieldsMode) -> &'static str {
 
 // Frame matchers use `byRefId`, distinct from the `byFrameRefID` field
 // matcher that field overrides use for the same concept.
+//
+// There is no `byIndex` frame matcher. `DataTransformerID` declares the
+// constant, but `frameMatchers` is built from exactly
+// `getFramePredicateMatchers()`, `getFrameNameMatchers()` (`byName`) and
+// `getRefIdMatchers()` (`byRefId`) in
+// `packages/grafana-data/src/transformations/matchers.ts`, so nothing
+// registers it and `Registry.get` throws on lookup.
 fn transformation_filter(filter: &TransformationFilter) -> Value {
     match filter {
         TransformationFilter::RefId(ref_id) => json!({"id": "byRefId", "options": ref_id}),
-        TransformationFilter::FrameName(name) => json!({"id": "byName", "options": name}),
-        TransformationFilter::FrameIndex(index) => json!({"id": "byIndex", "options": index}),
+        TransformationFilter::FrameName(name) => {
+            json!({"id": "byName", "options": escape_frame_name(name)})
+        }
     }
+}
+
+// Grafana's frame `byName` matcher runs its option through
+// `stringToJsRegex`, which anchors a plain string as `^…$` and treats a
+// leading `/` as a `/pattern/flags` literal. Panelist's API promises an
+// exact name, so every metacharacter is escaped here — including `/`,
+// which keeps a name like `/api/v1` from being parsed as a regex literal
+// and throwing.
+fn escape_frame_name(name: &str) -> String {
+    const METACHARACTERS: &[char] = &[
+        '\\', '^', '$', '.', '|', '?', '*', '+', '(', ')', '[', ']', '{', '}', '/',
+    ];
+    let mut escaped = String::with_capacity(name.len());
+    for character in name.chars() {
+        if METACHARACTERS.contains(&character) {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
 }

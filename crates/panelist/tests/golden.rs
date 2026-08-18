@@ -358,7 +358,11 @@ fn route_performance_matches_the_committed_golden_file() {
 //      literals in this very file do not trip the guard when it scans
 //      itself.
 //   3. Whole files are scanned, not an extracted function body, so a hatch
-//      in a helper that the dashboard calls is still in range.
+//      in a helper *within one of the scanned files* is still in range.
+//      The scan covers exactly the two files listed above; a helper moved
+//      into a new module is NOT in range. That is a known limit, recorded
+//      rather than papered over — widening it means walking the crate's
+//      test and example trees, which is a bigger change than this guard.
 //
 // Property 2 is what lets property 3 work: the guard can scan its own source
 // because everything distinctive about it lives inside string literals.

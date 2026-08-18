@@ -39,10 +39,12 @@ use crate::{Reducer, SortDirection};
 pub(crate) enum TransformationFilter {
     /// Matches the data frame produced by one query reference ID.
     RefId(String),
-    /// Matches a data frame by its name.
+    /// Matches data frames whose name matches a pattern.
+    ///
+    /// Grafana's frame `byName` matcher is a REGEX, not a literal name:
+    /// `stringToJsRegex` anchors the option as `^…$`. Lowering escapes the
+    /// author's string so `only_frame_name` means what it says.
     FrameName(String),
-    /// Matches a data frame by its position among the panel's results.
-    FrameIndex(usize),
 }
 
 /// Shared per-transformation state: which query results it applies to, and
@@ -127,7 +129,12 @@ impl OrganizeFields {
         self
     }
 
-    /// Hides a field.
+    /// Hides a field, by its name BEFORE any rename in this same
+    /// transformation.
+    ///
+    /// Grafana filters before it renames, so exclusion keys are matched
+    /// against the incoming field names — the opposite of [`Self::order`],
+    /// which takes the final names.
     #[must_use]
     pub fn hide(mut self, name: impl Into<String>) -> Self {
         self.hidden.insert(name.into());
@@ -336,17 +343,16 @@ macro_rules! impl_transformation_builder {
                     self
                 }
 
-                /// Applies this transformation only to one named data frame.
+                /// Applies this transformation only to the data frame with
+                /// this exact name.
+                ///
+                /// The name is matched literally. Grafana's underlying frame
+                /// matcher is a regex, so serialization escapes the string;
+                /// a name containing `.`, `*` or a leading `/` matches
+                /// itself rather than being interpreted.
                 #[must_use]
                 pub fn only_frame_name(mut self, name: impl Into<String>) -> Self {
                     self.envelope.filter = Some(TransformationFilter::FrameName(name.into()));
-                    self
-                }
-
-                /// Applies this transformation only to one data frame position.
-                #[must_use]
-                pub fn only_frame_index(mut self, index: usize) -> Self {
-                    self.envelope.filter = Some(TransformationFilter::FrameIndex(index));
                     self
                 }
 

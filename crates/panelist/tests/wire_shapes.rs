@@ -829,9 +829,17 @@ fn the_transformation_envelope_is_omitted_unless_set() {
             SortBy::asc("p95").only_frame_name("latency"),
             json!({"id": "byName", "options": "latency"}),
         ),
+        // `byName` is a regex anchored as `^…$` by `stringToJsRegex`
+        // (nameMatcher.ts), so an exact-name API has to escape. Without
+        // this, `p95.total` would also match `p95Xtotal`, and a name
+        // starting with `/` would be parsed as `/pattern/flags`.
         (
-            SortBy::asc("p95").only_frame_index(2),
-            json!({"id": "byIndex", "options": 2}),
+            SortBy::asc("p95").only_frame_name("p95.total"),
+            json!({"id": "byName", "options": r"p95\.total"}),
+        ),
+        (
+            SortBy::asc("p95").only_frame_name("/api/v1"),
+            json!({"id": "byName", "options": r"\/api\/v1"}),
         ),
     ] {
         let dashboard = Dashboard::new("Envelope").panel(
