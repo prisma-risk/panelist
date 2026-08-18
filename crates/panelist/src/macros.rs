@@ -751,10 +751,6 @@ macro_rules! __panelist_background_items {
         $cell = $cell.apply_to_row($apply);
         $crate::__panelist_background_items!($cell; $($rest)*);
     };
-    ($cell:ident; wrap_text: $wrap:expr; $($rest:tt)*) => {
-        $cell = $cell.wrap_text($wrap);
-        $crate::__panelist_background_items!($cell; $($rest)*);
-    };
 }
 
 #[doc(hidden)]

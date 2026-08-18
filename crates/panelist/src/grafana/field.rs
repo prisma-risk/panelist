@@ -349,9 +349,6 @@ pub(crate) fn cell_options_value(cell: &TableCell) -> Value {
             if let Some(apply_to_row) = options.apply_to_row {
                 output.insert("applyToRow".to_owned(), json!(apply_to_row));
             }
-            if let Some(wrap_text) = options.wrap_text {
-                output.insert("wrapText".to_owned(), json!(wrap_text));
-            }
         }
         TableCell::Gauge(options) => {
             output.insert("type".to_owned(), json!("gauge"));

@@ -342,7 +342,7 @@ fn table_override_matchers_and_properties_dsl_matches_the_builder_model() {
             }
 
             override names ["Latency", "Errors"] {
-                cell: colored_background { mode: gradient; apply_to_row: true; wrap_text: true; };
+                cell: colored_background { mode: gradient; apply_to_row: true; };
             }
 
             override time {
@@ -369,8 +369,7 @@ fn table_override_matchers_and_properties_dsl_matches_the_builder_model() {
                 FieldOverride::by_names(["Latency", "Errors"]).cell(
                     ColoredBackgroundCell::new()
                         .mode(CellBackgroundMode::Gradient)
-                        .apply_to_row(true)
-                        .wrap_text(true),
+                        .apply_to_row(true),
                 ),
             )
             .override_field(FieldOverride::time_fields().cell_type(TableCellType::Auto)),
@@ -606,7 +605,7 @@ fn cell_option_blocks_dsl_matches_the_builder_model() {
 
         table "Panel background default" {
             query: promql!("up");
-            cell: colored_background { mode: gradient; apply_to_row: true; wrap_text: true; };
+            cell: colored_background { mode: gradient; apply_to_row: true; };
         }
     };
 
@@ -650,8 +649,7 @@ fn cell_option_blocks_dsl_matches_the_builder_model() {
                 .cell(
                     ColoredBackgroundCell::new()
                         .mode(CellBackgroundMode::Gradient)
-                        .apply_to_row(true)
-                        .wrap_text(true),
+                        .apply_to_row(true),
                 ),
         );
 

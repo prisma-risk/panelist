@@ -216,32 +216,6 @@ fn every_table_cell_renderer_emits_its_grafana_options_shape() {
     );
 }
 
-/// KNOWN WRONG, pinned so the fix is a deliberate, visible change rather
-/// than a silent one.
-///
-/// Panelist emits `wrapText` inside `custom.cellOptions`. Grafana reads it
-/// from `custom.wrapText`: it is declared on `TableFieldOptions`
-/// (common.gen.ts L1113-1117, "if true, wrap the text content of the cell")
-/// and NOT on `TableColoredBackgroundCellOptions` (L851-858), and the only
-/// read is `field.config.custom?.wrapText` in
-/// packages/grafana-ui/src/components/Table/TableNG/utils.ts L88-92
-/// (`shouldTextWrap`). So `wrap_text(true)` is accepted, stored, returned
-/// unchanged, and ignored — the same invisible class as the `byNames`
-/// matcher.
-///
-/// Not fixed here: it is outside this round's brief, and the fix carries a
-/// modelling question the owner should settle first — Grafana applies
-/// `wrapText` to any cell type, while Panelist hangs it off
-/// `ColoredBackgroundCell` alone. See the final fix report.
-#[test]
-fn colored_background_wrap_text_is_emitted_where_grafana_does_not_read_it() {
-    assert_eq!(
-        cell_value(ColoredBackgroundCell::new().wrap_text(true)),
-        json!({"type": "color-background", "wrapText": true}),
-        "if this assertion changed, wrapText was moved — update the report"
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Panel options, per kind: the exact object with nothing set, and the exact
 // object with every typed setter used.

@@ -67,7 +67,6 @@ pub enum CellValueDisplay {
 pub struct ColoredBackgroundCell {
     pub(crate) mode: Option<CellBackgroundMode>,
     pub(crate) apply_to_row: Option<bool>,
-    pub(crate) wrap_text: Option<bool>,
 }
 
 impl ColoredBackgroundCell {
@@ -88,13 +87,6 @@ impl ColoredBackgroundCell {
     #[must_use]
     pub fn apply_to_row(mut self, apply_to_row: bool) -> Self {
         self.apply_to_row = Some(apply_to_row);
-        self
-    }
-
-    /// Wraps long text inside the cell.
-    #[must_use]
-    pub fn wrap_text(mut self, wrap_text: bool) -> Self {
-        self.wrap_text = Some(wrap_text);
         self
     }
 }
