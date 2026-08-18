@@ -841,7 +841,7 @@ fn panel_option_parity_dsl_matches_the_builder_model() {
             span_nulls: true;
             line_interpolation: step_after;
             show_points: never;
-            tooltip { mode: multi; sort: descending; hide_zeros: true; }
+            tooltip { mode: multi; sort: desc; hide_zeros: true; }
         }
 
         stat "Status" {
@@ -943,7 +943,7 @@ fn panel_option_parity_emits_the_grafana_wire_values() {
             span_nulls: true;
             line_interpolation: step_after;
             show_points: never;
-            tooltip { mode: multi; sort: descending; hide_zeros: true; }
+            tooltip { mode: multi; sort: desc; hide_zeros: true; }
         }
 
         stat "Status" {
@@ -998,5 +998,137 @@ fn panel_option_parity_emits_the_grafana_wire_values() {
             "targetBlank": true, "title": "Runbook", "type": "link",
             "url": "https://runbook"
         }])
+    );
+}
+
+/// Closes the dashboard- and variable-level DSL parity gaps from issue #12.
+///
+/// Non-default values throughout: `VariableSort::Disabled`,
+/// `DashboardCursorSync::Off` and `selected: true` are the defaults, and a
+/// DSL-vs-builder assertion cannot see an arm that does nothing when the
+/// value it would set is what the field already holds.
+#[test]
+fn dashboard_and_variable_parity_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Parity";
+        cursor_sync: crosshair;
+        link "Runbook" => "https://runbook";
+        link "Dashboards" => "https://dash" { target_blank: true; tags: ["ops"]; }
+
+        variable "instance" {
+            query: promql!("label_values(up, instance)");
+            regex: "prod-.*";
+            sort: alphabetical_case_insensitive_desc;
+            all_value: ".*";
+            allow_custom_value: true;
+            skip_url_sync: true;
+            current "Production" => "prod" { selected: false; }
+        }
+
+        variable "tier" {
+            values: ["gold", "silver"];
+            all_value: "*";
+            allow_custom_value: true;
+            skip_url_sync: true;
+            current "Gold" => "gold";
+        }
+    };
+
+    let from_builder = Dashboard::new("Parity")
+        .cursor_sync(DashboardCursorSync::Crosshair)
+        .link(DashboardLink::new("Runbook", "https://runbook"))
+        .link(
+            DashboardLink::new("Dashboards", "https://dash")
+                .target_blank(true)
+                .tags(["ops"]),
+        )
+        .variable(
+            VariableBuilder::new("instance")
+                .query(PrometheusQuery::new("label_values(up, instance)"))
+                .regex("prod-.*")
+                .sort(VariableSort::AlphabeticalCaseInsensitiveDescending)
+                .all_value(".*")
+                .allow_custom_value(true)
+                .skip_url_sync(true)
+                .current(VariableSelection::new("Production", "prod").selected(false))
+                .build(),
+        )
+        .variable(
+            VariableBuilder::new("tier")
+                .values(["gold", "silver"])
+                .all_value("*")
+                .allow_custom_value(true)
+                .skip_url_sync(true)
+                .current(VariableSelection::new("Gold", "gold"))
+                .build(),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// Pins the emitted wire keys. The parity test above only shows the two
+/// surfaces agree, which stays true when both are wrong together.
+#[test]
+fn dashboard_and_variable_parity_emits_the_grafana_wire_values() {
+    let dashboard = dashboard! {
+        title: "Wire";
+        cursor_sync: tooltip;
+        link "Runbook" => "https://runbook" { target_blank: true; }
+
+        variable "instance" {
+            query: promql!("label_values(up, instance)");
+            regex: "prod-.*";
+            sort: numerical_desc;
+            all_value: ".*";
+            allow_custom_value: true;
+            skip_url_sync: true;
+            current "Production" => "prod";
+        }
+    };
+    let json: serde_json::Value = serde_json::from_str(&dashboard.to_json().unwrap()).unwrap();
+
+    assert_eq!(json["graphTooltip"], json!(2));
+    assert_eq!(json["links"][0]["targetBlank"], json!(true));
+
+    let variable = &json["templating"]["list"][0];
+    assert_eq!(variable["regex"], json!("prod-.*"));
+    // Grafana encodes VariableSort numerically; NumericalDescending is 4.
+    assert_eq!(variable["sort"], json!(4));
+    assert_eq!(variable["allValue"], json!(".*"));
+    assert_eq!(variable["allowCustomValue"], json!(true));
+    assert_eq!(variable["skipUrlSync"], json!(true));
+    assert_eq!(
+        variable["current"],
+        json!({"selected": true, "text": "Production", "value": "prod"})
+    );
+}
+
+/// `regex` and `sort` have no Grafana key on a custom variable. Setting them
+/// has to fail loudly: in the emitted JSON a silently ignored `sort` is
+/// indistinguishable from one that worked.
+#[test]
+fn variable_options_that_do_not_apply_are_reported_not_dropped() {
+    let dashboard = dashboard! {
+        title: "Bad";
+        variable "tier" {
+            values: ["gold"];
+            regex: "ignored";
+            sort: numerical_desc;
+        }
+    };
+
+    let error = dashboard.to_json().expect_err("must not serialize");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("regex does not apply to a custom variable"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("sort does not apply to a custom variable"),
+        "{rendered}"
     );
 }

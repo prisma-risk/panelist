@@ -167,6 +167,19 @@ pub enum ValidationError {
         /// Unresolved query reference.
         ref_id: String,
     },
+    /// A variable option was set that the resolved variable kind has no
+    /// Grafana key for, so it would be dropped without trace.
+    #[error(
+        "variable \"{variable}\": {option} does not apply to a {kind} variable and would be silently dropped"
+    )]
+    VariableOptionNotApplicable {
+        /// Variable name.
+        variable: String,
+        /// The option that was set.
+        option: &'static str,
+        /// The variable kind it resolved to.
+        kind: &'static str,
+    },
     /// A transformation is missing a required field name.
     #[error("panel \"{panel}\": {transformation} transformation requires a field name")]
     MissingTransformationField {
