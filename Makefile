@@ -1,7 +1,7 @@
 CARGO ?= cargo
 CARGO_DENY_CHECK_FLAGS ?=
 
-.PHONY: all ci check fmt fmt-check lint fix build test doc headers package release-dry-run deny clean help
+.PHONY: all ci check fmt fmt-check lint fix build test doc headers package release-dry-run deny verify-grafana clean help
 
 all: ci
 
@@ -45,6 +45,9 @@ release-dry-run:
 deny:
 	$(CARGO) deny check $(CARGO_DENY_CHECK_FLAGS)
 
+verify-grafana:
+	scripts/verify-grafana.sh
+
 clean:
 	$(CARGO) clean
 
@@ -64,4 +67,5 @@ help:
 	@echo "  make package      Verify the distributable crate tarball"
 	@echo "  make release-dry-run  Validate the crates.io upload without publishing"
 	@echo "  make deny         Check licenses and advisories"
+	@echo "  make verify-grafana  Round-trip golden dashboards through Grafana (needs Docker)"
 	@echo "  make clean        Remove Cargo build output"
