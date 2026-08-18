@@ -21,68 +21,10 @@
 //  limitations under the License.
 //
 
-use std::{fs, path::PathBuf};
-
 use panelist::prelude::*;
 
-fn golden_dashboard() -> Dashboard {
-    dashboard! {
-        title: "Golden service";
-        uid: "golden-service";
-        description: "Stable output contract.";
-        tags: ["golden", "test"];
-        refresh: "30s";
-        datasource: prometheus("prometheus-main");
-
-        variable "region" {
-            values: ["us-east-1", "us-west-2"];
-            default: "us-east-1";
-        }
-
-        row "Overview" {
-            stat "Availability" {
-                query: promql!("avg(up{region=\"$region\"})");
-                unit: percent;
-                width: 8;
-                thresholds {
-                    red: 0.0;
-                    yellow: 99.0;
-                    green: 99.9;
-                }
-            }
-
-            timeseries "Traffic" {
-                query: promql!("sum by (status) (rate(requests_total[$__rate_interval]))") {
-                    legend: "{{status}}";
-                }
-                unit: reqps;
-                width: 16;
-            }
-        }
-    }
-}
-
-#[test]
-fn generated_json_matches_committed_golden_file() {
-    let actual = format!("{}\n", golden_dashboard().to_json_pretty().unwrap());
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/basic.json");
-
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        fs::write(&path, &actual).unwrap();
-    }
-
-    let expected = fs::read_to_string(path).unwrap();
-    assert_eq!(actual, expected);
-}
-
-/// The acceptance dashboard for the whole typed-transformations effort: a
-/// real operational dashboard expressed entirely through `dashboard!` and
-/// typed builders, with no raw Grafana JSON anywhere. It also doubles as the
-/// only golden coverage for the panel kinds `basic.json` doesn't exercise —
-/// gauge, table, bar gauge, heatmap, and text all appear here with both
-/// their bare defaults and their typed options exercised.
-fn route_performance_dashboard() -> Dashboard {
-    dashboard! {
+fn main() -> panelist::Result<()> {
+    let dashboard = dashboard! {
         title: "Route performance";
         uid: "route-performance";
         refresh: "30s";
@@ -256,47 +198,9 @@ fn route_performance_dashboard() -> Dashboard {
                 width: 12;
             }
         }
-    }
-}
+    };
 
-#[test]
-fn route_performance_matches_the_committed_golden_file() {
-    let actual = format!(
-        "{}\n",
-        route_performance_dashboard().to_json_pretty().unwrap()
-    );
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/route_performance.json");
-
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        fs::write(&path, &actual).unwrap();
-    }
-
-    let expected = fs::read_to_string(path).unwrap();
-    assert_eq!(actual, expected);
-}
-
-#[test]
-fn route_performance_uses_no_raw_escape_hatches() {
-    let source = include_str!("golden.rs");
-    let dashboard = source
-        .split("fn route_performance_dashboard")
-        .nth(1)
-        .expect("acceptance dashboard should be defined");
-    let body = &dashboard[..dashboard.find("\n}\n").expect("function should close")];
-
-    for hatch in [
-        "option \"", // DSL:     option "key": value;
-        ".option(",  // builder: .option("key", json!(…))
-        "extra \"",  // DSL:     extra "key": value;
-        ".extra(",   // builder: .extra("key", json!(…))
-        "RawPanel",
-        "RawQuery",
-        "RawTransformation",
-    ] {
-        assert!(
-            !body.contains(hatch),
-            "acceptance dashboard must not use the {hatch} escape hatch"
-        );
-    }
+    dashboard.validate()?;
+    let _json = dashboard.to_json_pretty()?;
+    Ok(())
 }
