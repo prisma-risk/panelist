@@ -206,15 +206,23 @@ fn route_performance_dashboard() -> Dashboard {
                     rename "Value #E" => "p50";
                     rename "Value #F" => "p95";
                     rename "Value #G" => "p99";
-                    // `timeSeriesTable` names its synthesized trend field
-                    // `Trend #<refId>` directly — it never goes through the
-                    // `Value` -> `Value #<refId>` substitution `joinByField`
-                    // applies to plain Prometheus table-format results (that
-                    // substitution only fires for fields literally named
-                    // `Value`). Renaming from `Value #H` here would be a
-                    // silent no-op, so this one differs from the other seven
-                    // renames on purpose — do not "fix" it back to match them.
+                    // The `Value #<refId>` names on A-G come from the
+                    // Prometheus datasource's own response transform, which
+                    // renames each query's `Value` field to `Value #<refId>`
+                    // whenever a panel has more than one `format: table`
+                    // query — before any panel transformation runs.
+                    // `timeSeriesTable`, by contrast, is a panel transform
+                    // that names its synthesized trend field `Trend #<refId>`
+                    // directly at creation; it never produces a plain
+                    // `Value` field, so it never goes through that
+                    // datasource-side renaming. Renaming from `Value #H`
+                    // here would be a silent no-op, so this one differs from
+                    // the other seven on purpose — do not "fix" it back to
+                    // match them.
                     rename "Trend #H" => "Trend";
+                    // The joined frame carries seven separate `Time` fields,
+                    // one per `format: table` query above — `excludeByName`
+                    // matches by name, so this one entry hides all of them.
                     hide "Time";
                     order ["route", "RPS", "4xx rate", "5xx rate", "error %", "p50", "p95", "p99", "Trend"];
                 }
