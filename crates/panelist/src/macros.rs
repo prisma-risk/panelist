@@ -52,8 +52,9 @@ macro_rules! loki {
 /// iterators, and conditionals to create reusable `Vec<Panel>` fragments, then
 /// insert them with `panels: fragment;`.
 ///
-/// The panel body grammar (`legend { … }`, `cell:`, `sort_by:`, the heatmap
-/// options, and so on) is one shared rule set across every panel kind, and
+/// The panel body grammar (`legend { … }`, `tooltip { … }`, `reduce { … }`,
+/// `cell:`, `sort_by:`, `mapping … => …`, `link … => …`, the heatmap options,
+/// and so on) is one shared rule set across every panel kind, and
 /// `format:` inside a query block is one shared rule set across every query
 /// kind. Rules that only make sense for one concrete type — for example
 /// `format:` outside `promql!(…) { … }`, or the heatmap rules on a panel kind
@@ -409,6 +410,41 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.thresholds(__panelist_thresholds);
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    ($panel:ident; tooltip { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_tooltip = $crate::Tooltip::new();
+        $crate::__panelist_tooltip_items!(__panelist_tooltip; $($body)*);
+        $panel = $panel.tooltip(__panelist_tooltip);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; reduce { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_reduce = $crate::ReduceOptions::new();
+        $crate::__panelist_reduce_items!(__panelist_reduce; $($body)*);
+        $panel = $panel.reduce_options(__panelist_reduce);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    // Block forms come before their `;` counterparts: an arm ending in
+    // `{ $($body:tt)* } $($rest:tt)*` has no literal separator to anchor on,
+    // so ordering is what keeps it from being shadowed.
+    ($panel:ident; mapping $value:literal => $text:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_mapping = $crate::ValueMapping::new($value, $text);
+        $crate::__panelist_mapping_items!(__panelist_mapping; $($body)*);
+        $panel = $panel.mapping(__panelist_mapping);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; mapping $value:literal => $text:literal; $($rest:tt)*) => {
+        $panel = $panel.mapping($crate::ValueMapping::new($value, $text));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; link $title:literal => $url:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_link = $crate::DashboardLink::new($title, $url);
+        $crate::__panelist_link_items!(__panelist_link; $($body)*);
+        $panel = $panel.link(__panelist_link);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; link $title:literal => $url:literal; $($rest:tt)*) => {
+        $panel = $panel.link($crate::DashboardLink::new($title, $url));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; legend { $($body:tt)* } $($rest:tt)*) => {
         let mut __panelist_legend = $crate::Legend::new();
         $crate::__panelist_legend_items!(__panelist_legend; $($body)*);
@@ -510,6 +546,68 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.display_mode($crate::__panelist_bar_gauge_display_mode!($mode));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    ($panel:ident; fill_opacity: $opacity:expr; $($rest:tt)*) => {
+        $panel = $panel.fill_opacity($opacity);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; line_width: $width:expr; $($rest:tt)*) => {
+        $panel = $panel.line_width($width);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; point_size: $size:expr; $($rest:tt)*) => {
+        $panel = $panel.point_size($size);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; span_nulls: $span:expr; $($rest:tt)*) => {
+        $panel = $panel.span_nulls($span);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; line_interpolation: $mode:ident; $($rest:tt)*) => {
+        $panel = $panel.line_interpolation($crate::__panelist_line_interpolation!($mode));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; show_points: $visibility:ident; $($rest:tt)*) => {
+        $panel = $panel.show_points($crate::__panelist_point_visibility!($visibility));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; wide_layout: $wide:expr; $($rest:tt)*) => {
+        $panel = $panel.wide_layout($wide);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    // Stat's three colour modes. The heatmap arms below take `scheme` and
+    // `opacity` and bind `HeatmapColorMode`; these take a disjoint set of
+    // literals and bind `StatColorMode`, so one keyword serves both panel
+    // kinds without ambiguity and a wrong pairing stays a type error.
+    ($panel:ident; color_mode: value; $($rest:tt)*) => {
+        $panel = $panel.color_mode($crate::StatColorMode::Value);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color_mode: background; $($rest:tt)*) => {
+        $panel = $panel.color_mode($crate::StatColorMode::Background);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color_mode: none; $($rest:tt)*) => {
+        $panel = $panel.color_mode($crate::StatColorMode::None);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    // Field colour scheme. `fixed(…)` and `continuous(…)` carry an argument,
+    // so they precede the bare-literal arms.
+    ($panel:ident; color: fixed($color:ident); $($rest:tt)*) => {
+        $panel = $panel.color($crate::ColorScheme::Fixed($crate::__panelist_color!($color)));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color: continuous($scheme:expr); $($rest:tt)*) => {
+        $panel = $panel.color($crate::ColorScheme::Continuous(($scheme).into()));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color: thresholds; $($rest:tt)*) => {
+        $panel = $panel.color($crate::ColorScheme::Thresholds);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color: classic_palette; $($rest:tt)*) => {
+        $panel = $panel.color($crate::ColorScheme::ClassicPalette);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; color_mode: scheme; $($rest:tt)*) => {
         $panel = $panel.color_mode($crate::HeatmapColorMode::Scheme);
         $crate::__panelist_panel_items!($panel; $($rest)*);
@@ -598,6 +696,125 @@ macro_rules! __panelist_bar_gauge_display_mode {
     };
     (lcd) => {
         $crate::BarGaugeDisplayMode::Lcd
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_line_interpolation {
+    (linear) => {
+        $crate::LineInterpolation::Linear
+    };
+    (smooth) => {
+        $crate::LineInterpolation::Smooth
+    };
+    (step_before) => {
+        $crate::LineInterpolation::StepBefore
+    };
+    (step_after) => {
+        $crate::LineInterpolation::StepAfter
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_point_visibility {
+    (auto) => {
+        $crate::PointVisibility::Auto
+    };
+    (always) => {
+        $crate::PointVisibility::Always
+    };
+    (never) => {
+        $crate::PointVisibility::Never
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_tooltip_items {
+    ($tooltip:ident;) => {};
+    ($tooltip:ident; mode: single; $($rest:tt)*) => {
+        $tooltip = $tooltip.mode($crate::TooltipMode::Single);
+        $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
+    };
+    ($tooltip:ident; mode: multi; $($rest:tt)*) => {
+        $tooltip = $tooltip.mode($crate::TooltipMode::Multi);
+        $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
+    };
+    ($tooltip:ident; mode: none; $($rest:tt)*) => {
+        $tooltip = $tooltip.mode($crate::TooltipMode::None);
+        $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
+    };
+    ($tooltip:ident; sort: none; $($rest:tt)*) => {
+        $tooltip = $tooltip.sort($crate::TooltipSort::None);
+        $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
+    };
+    ($tooltip:ident; sort: ascending; $($rest:tt)*) => {
+        $tooltip = $tooltip.sort($crate::TooltipSort::Ascending);
+        $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
+    };
+    ($tooltip:ident; sort: descending; $($rest:tt)*) => {
+        $tooltip = $tooltip.sort($crate::TooltipSort::Descending);
+        $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
+    };
+    ($tooltip:ident; hide_zeros: $hide:expr; $($rest:tt)*) => {
+        $tooltip = $tooltip.hide_zeros($hide);
+        $crate::__panelist_tooltip_items!($tooltip; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_reduce_items {
+    ($reduce:ident;) => {};
+    ($reduce:ident; values: $values:expr; $($rest:tt)*) => {
+        $reduce = $reduce.values($values);
+        $crate::__panelist_reduce_items!($reduce; $($rest)*);
+    };
+    ($reduce:ident; calculations: [$($value:ident),* $(,)?]; $($rest:tt)*) => {
+        $reduce = $reduce.calculations([$($crate::__panelist_reducer!($value)),*]);
+        $crate::__panelist_reduce_items!($reduce; $($rest)*);
+    };
+    ($reduce:ident; fields: $fields:expr; $($rest:tt)*) => {
+        $reduce = $reduce.fields($fields);
+        $crate::__panelist_reduce_items!($reduce; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_mapping_items {
+    ($mapping:ident;) => {};
+    ($mapping:ident; color: $color:ident; $($rest:tt)*) => {
+        $mapping = $mapping.color($crate::__panelist_color!($color));
+        $crate::__panelist_mapping_items!($mapping; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_link_items {
+    ($link:ident;) => {};
+    ($link:ident; tooltip: $tooltip:expr; $($rest:tt)*) => {
+        $link = $link.tooltip($tooltip);
+        $crate::__panelist_link_items!($link; $($rest)*);
+    };
+    ($link:ident; target_blank: $target:expr; $($rest:tt)*) => {
+        $link = $link.target_blank($target);
+        $crate::__panelist_link_items!($link; $($rest)*);
+    };
+    ($link:ident; include_vars: $include:expr; $($rest:tt)*) => {
+        $link = $link.include_vars($include);
+        $crate::__panelist_link_items!($link; $($rest)*);
+    };
+    ($link:ident; keep_time: $keep:expr; $($rest:tt)*) => {
+        $link = $link.keep_time($keep);
+        $crate::__panelist_link_items!($link; $($rest)*);
+    };
+    ($link:ident; tags: [$($tag:expr),* $(,)?]; $($rest:tt)*) => {
+        $link = $link.tags([$($tag),*]);
+        $crate::__panelist_link_items!($link; $($rest)*);
     };
 }
 
