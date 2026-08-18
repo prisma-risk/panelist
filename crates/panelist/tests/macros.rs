@@ -264,3 +264,163 @@ fn transform_dsl_covers_organize_convert_and_labels_variants() {
         from_builder.to_json_pretty().unwrap()
     );
 }
+
+#[test]
+fn table_cell_and_sort_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Cells";
+
+        table "Route performance" {
+            query: promql!("up");
+
+            sort_by: ("p95", desc);
+
+            override field("Error rate") {
+                unit: percent;
+                cell: colored_background;
+                thresholds {
+                    green: 0.0;
+                    yellow: 1.0;
+                    red: 5.0;
+                }
+            }
+
+            override field("Trend") {
+                cell: sparkline { hide_value: true; line_width: 2.0; };
+            }
+
+            override numeric {
+                decimals: 2;
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Cells").panel(
+        Table::new("Route performance")
+            .query(PrometheusQuery::new("up"))
+            .sort_by("p95", SortDirection::Descending)
+            .override_field(
+                FieldOverride::by_name("Error rate")
+                    .unit(Unit::Percent)
+                    .cell_type(TableCellType::ColoredBackground)
+                    .thresholds(Thresholds::new().green(0.0).yellow(1.0).red(5.0)),
+            )
+            .override_field(
+                FieldOverride::by_name("Trend")
+                    .cell(SparklineCell::new().hide_value(true).line_width(2.0)),
+            )
+            .override_field(FieldOverride::numeric_fields().decimals(2)),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
+fn table_override_matchers_and_properties_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Overrides";
+
+        table "Service overview" {
+            query: promql!("up") { ref_id: "A"; }
+
+            override query("A") {
+                display_name: "Latency (ms)";
+                min: 0.0;
+                max: 500.0;
+            }
+
+            override type("number") {
+                unit: custom("USD");
+                cell: colored_text;
+            }
+
+            override names ["Latency", "Errors"] {
+                cell: colored_background { mode: gradient; apply_to_row: true; wrap_text: true; };
+            }
+
+            override time {
+                cell: auto;
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Overrides").panel(
+        Table::new("Service overview")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .override_field(
+                FieldOverride::by_query("A")
+                    .display_name("Latency (ms)")
+                    .min(0.0)
+                    .max(500.0),
+            )
+            .override_field(
+                FieldOverride::by_type("number")
+                    .unit(Unit::custom("USD"))
+                    .cell_type(TableCellType::ColoredText),
+            )
+            .override_field(
+                FieldOverride::by_names(["Latency", "Errors"]).cell(
+                    ColoredBackgroundCell::new()
+                        .mode(CellBackgroundMode::Gradient)
+                        .apply_to_row(true)
+                        .wrap_text(true),
+                ),
+            )
+            .override_field(FieldOverride::time_fields().cell_type(TableCellType::Auto)),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
+fn table_panel_default_cell_and_remaining_cell_variants_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Cell defaults";
+
+        table "Latency" {
+            query: promql!("up");
+
+            cell: gauge;
+
+            override field("Raw") {
+                cell: sparkline;
+            }
+
+            override regex("^p9.*") {
+                cell: sparkline { fill_opacity: 20.0; };
+            }
+
+            override field("Steady") {
+                cell: colored_background { mode: basic; };
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Cell defaults").panel(
+        Table::new("Latency")
+            .query(PrometheusQuery::new("up"))
+            .cell(TableCellType::Gauge)
+            .override_field(FieldOverride::by_name("Raw").cell_type(TableCellType::Sparkline))
+            .override_field(
+                FieldOverride::by_regex("^p9.*").cell(SparklineCell::new().fill_opacity(20.0)),
+            )
+            .override_field(
+                FieldOverride::by_name("Steady")
+                    .cell(ColoredBackgroundCell::new().mode(CellBackgroundMode::Basic)),
+            ),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}

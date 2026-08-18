@@ -417,6 +417,44 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.override_field(__panelist_override);
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    ($panel:ident; override query($ref_id:expr) { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_override = $crate::FieldOverride::by_query($ref_id);
+        $crate::__panelist_override_items!(__panelist_override; $($body)*);
+        $panel = $panel.override_field(__panelist_override);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; override type($field_type:expr) { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_override = $crate::FieldOverride::by_type($field_type);
+        $crate::__panelist_override_items!(__panelist_override; $($body)*);
+        $panel = $panel.override_field(__panelist_override);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; override names [$($name:expr),* $(,)?] { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_override = $crate::FieldOverride::by_names([$($name),*]);
+        $crate::__panelist_override_items!(__panelist_override; $($body)*);
+        $panel = $panel.override_field(__panelist_override);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; override numeric { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_override = $crate::FieldOverride::numeric_fields();
+        $crate::__panelist_override_items!(__panelist_override; $($body)*);
+        $panel = $panel.override_field(__panelist_override);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; override time { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_override = $crate::FieldOverride::time_fields();
+        $crate::__panelist_override_items!(__panelist_override; $($body)*);
+        $panel = $panel.override_field(__panelist_override);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; sort_by: ($field:expr, $direction:ident); $($rest:tt)*) => {
+        $panel = $panel.sort_by($field, $crate::__panelist_sort_direction!($direction));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; cell: $cell:ident; $($rest:tt)*) => {
+        $panel = $panel.cell($crate::__panelist_cell_type!($cell));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; option $key:literal: $value:expr; $($rest:tt)*) => {
         $panel = $panel.option($key, $crate::__private::serde_json::json!($value));
         $crate::__panelist_panel_items!($panel; $($rest)*);
@@ -511,6 +549,66 @@ macro_rules! __panelist_legend_items {
 
 #[doc(hidden)]
 #[macro_export]
+macro_rules! __panelist_cell_type {
+    (auto) => {
+        $crate::TableCellType::Auto
+    };
+    (colored_text) => {
+        $crate::TableCellType::ColoredText
+    };
+    (colored_background) => {
+        $crate::TableCellType::ColoredBackground
+    };
+    (gauge) => {
+        $crate::TableCellType::Gauge
+    };
+    (sparkline) => {
+        $crate::TableCellType::Sparkline
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_sparkline_items {
+    ($cell:ident;) => {};
+    ($cell:ident; hide_value: $hide:expr; $($rest:tt)*) => {
+        $cell = $cell.hide_value($hide);
+        $crate::__panelist_sparkline_items!($cell; $($rest)*);
+    };
+    ($cell:ident; line_width: $width:expr; $($rest:tt)*) => {
+        $cell = $cell.line_width($width);
+        $crate::__panelist_sparkline_items!($cell; $($rest)*);
+    };
+    ($cell:ident; fill_opacity: $opacity:expr; $($rest:tt)*) => {
+        $cell = $cell.fill_opacity($opacity);
+        $crate::__panelist_sparkline_items!($cell; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_background_items {
+    ($cell:ident;) => {};
+    ($cell:ident; mode: basic; $($rest:tt)*) => {
+        $cell = $cell.mode($crate::CellBackgroundMode::Basic);
+        $crate::__panelist_background_items!($cell; $($rest)*);
+    };
+    ($cell:ident; mode: gradient; $($rest:tt)*) => {
+        $cell = $cell.mode($crate::CellBackgroundMode::Gradient);
+        $crate::__panelist_background_items!($cell; $($rest)*);
+    };
+    ($cell:ident; apply_to_row: $apply:expr; $($rest:tt)*) => {
+        $cell = $cell.apply_to_row($apply);
+        $crate::__panelist_background_items!($cell; $($rest)*);
+    };
+    ($cell:ident; wrap_text: $wrap:expr; $($rest:tt)*) => {
+        $cell = $cell.wrap_text($wrap);
+        $crate::__panelist_background_items!($cell; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __panelist_override_items {
     ($field:ident;) => {};
     ($field:ident; color: $color:literal; $($rest:tt)*) => {
@@ -523,6 +621,52 @@ macro_rules! __panelist_override_items {
     };
     ($field:ident; line_width: $width:expr; $($rest:tt)*) => {
         $field = $field.line_width($width);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; cell: sparkline { $($body:tt)* }; $($rest:tt)*) => {
+        let mut __panelist_cell = $crate::SparklineCell::new();
+        $crate::__panelist_sparkline_items!(__panelist_cell; $($body)*);
+        $field = $field.cell(__panelist_cell);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; cell: colored_background { $($body:tt)* }; $($rest:tt)*) => {
+        let mut __panelist_cell = $crate::ColoredBackgroundCell::new();
+        $crate::__panelist_background_items!(__panelist_cell; $($body)*);
+        $field = $field.cell(__panelist_cell);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; cell: $cell:ident; $($rest:tt)*) => {
+        $field = $field.cell_type($crate::__panelist_cell_type!($cell));
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; unit: custom($unit:expr); $($rest:tt)*) => {
+        $field = $field.unit($crate::Unit::Custom(($unit).into()));
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; unit: $unit:ident; $($rest:tt)*) => {
+        $field = $field.unit($crate::__panelist_unit!($unit));
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; min: $min:expr; $($rest:tt)*) => {
+        $field = $field.min($min);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; max: $max:expr; $($rest:tt)*) => {
+        $field = $field.max($max);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; decimals: $decimals:expr; $($rest:tt)*) => {
+        $field = $field.decimals($decimals);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; display_name: $name:expr; $($rest:tt)*) => {
+        $field = $field.display_name($name);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; thresholds { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_thresholds = $crate::Thresholds::new();
+        $crate::__panelist_threshold_items!(__panelist_thresholds; $($body)*);
+        $field = $field.thresholds(__panelist_thresholds);
         $crate::__panelist_override_items!($field; $($rest)*);
     };
 }
