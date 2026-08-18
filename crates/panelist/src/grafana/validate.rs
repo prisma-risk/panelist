@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, HashSet};
 use crate::{
     Dashboard, DashboardItem, OrganizeFields, OverrideMatcher, Panel, Thresholds, Transformation,
     ValidationError, ValidationErrors, Variable, transformation::TransformationFilter,
+    variable::VariableDiagnostic,
 };
 
 use super::query::effective_ref_ids;
@@ -51,19 +52,34 @@ pub(crate) fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
             | Variable::Custom(_)
             | Variable::Constant(_) => {}
         }
-        // Options the builder accepted that this kind has no Grafana key
-        // for. Reported rather than dropped: a silently ignored `sort` is
-        // indistinguishable from a working one in the emitted JSON.
-        let (inapplicable, kind) = match variable {
-            Variable::Custom(variable) => (variable.inapplicable.as_slice(), "custom"),
-            Variable::Constant(variable) => (variable.inapplicable.as_slice(), "constant"),
-            Variable::DataSource(_) | Variable::Query(_) => ([].as_slice(), ""),
+        // Problems the builder recorded because Grafana's model cannot
+        // express them. Reported rather than dropped: a silently ignored
+        // `sort` is indistinguishable from a working one in the emitted JSON.
+        let (diagnostics, kind) = match variable {
+            Variable::Query(variable) => (variable.diagnostics.as_slice(), "query"),
+            Variable::DataSource(variable) => (variable.diagnostics.as_slice(), "datasource"),
+            Variable::Custom(variable) => (variable.diagnostics.as_slice(), "custom"),
+            Variable::Constant(variable) => (variable.diagnostics.as_slice(), "constant"),
         };
-        for option in inapplicable {
-            errors.push(ValidationError::VariableOptionNotApplicable {
-                variable: variable.name().to_owned(),
-                option,
-                kind,
+        for diagnostic in diagnostics {
+            errors.push(match diagnostic {
+                VariableDiagnostic::OptionNotApplicable(option) => {
+                    ValidationError::VariableOptionNotApplicable {
+                        variable: variable.name().to_owned(),
+                        option,
+                        kind,
+                    }
+                }
+                VariableDiagnostic::NoSelector => ValidationError::MissingVariableSelector {
+                    variable: variable.name().to_owned(),
+                },
+                VariableDiagnostic::ConflictingSelectors { chosen, ignored } => {
+                    ValidationError::ConflictingVariableSelectors {
+                        variable: variable.name().to_owned(),
+                        chosen,
+                        ignored,
+                    }
+                }
             });
         }
     }

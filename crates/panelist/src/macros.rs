@@ -1199,6 +1199,12 @@ macro_rules! __panelist_variable_items {
         $variable = $variable.hidden($hidden);
         $crate::__panelist_variable_items!($variable; $($rest)*);
     };
+    // Selects a datasource variable. Distinct from `datasource:`, which sets
+    // the datasource a QUERY variable runs against; this one picks the kind.
+    ($variable:ident; plugin: $plugin:expr; $($rest:tt)*) => {
+        $variable = $variable.plugin($plugin);
+        $crate::__panelist_variable_items!($variable; $($rest)*);
+    };
     ($variable:ident; regex: $regex:expr; $($rest:tt)*) => {
         $variable = $variable.regex($regex);
         $crate::__panelist_variable_items!($variable; $($rest)*);

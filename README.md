@@ -151,6 +151,33 @@ let dashboard = dashboard! {
 # let _ = dashboard;
 ```
 
+A variable's kind comes from its selector: `query:`, `plugin:`, `value:`, or
+`values:`. `plugin:` makes a datasource variable, and is distinct from
+`datasource:`, which sets the datasource a *query* variable runs against:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "API";
+
+    variable "source" {
+        plugin: "prometheus";
+        regex: "prod-.*";
+        current "Main" => "prometheus-main";
+    }
+
+    variable "instance" {
+        query: promql!("label_values(up, instance)");
+        datasource: prometheus("prometheus-main");
+    }
+};
+# let _ = dashboard;
+```
+
+Setting no selector, or more than one, is a validation error rather than a
+guess. So is an option the chosen kind has no Grafana key for.
+
 `regex` and `sort` have no Grafana key on a custom or constant variable.
 Setting them there is a validation error rather than a silent no-op, because
 an ignored `sort` and a working one look identical in the emitted JSON.
