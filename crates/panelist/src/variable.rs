@@ -45,6 +45,27 @@ impl VariableRefresh {
     }
 }
 
+/// A problem `VariableBuilder` found while resolving a variable, carried on
+/// the produced variable so validation can report it.
+///
+/// Carrying these is deliberate. The alternative is dropping them, and a
+/// dropped option is indistinguishable from a working one in the emitted
+/// JSON.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum VariableDiagnostic {
+    /// An option was set that this variable kind has no Grafana key for.
+    OptionNotApplicable(&'static str),
+    /// Nothing selected a variable kind.
+    NoSelector,
+    /// More than one selector was set.
+    ConflictingSelectors {
+        /// The selector that decided the kind.
+        chosen: &'static str,
+        /// A selector that was ignored.
+        ignored: &'static str,
+    },
+}
+
 /// Ordering applied to values returned for a query variable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VariableSort {
@@ -118,6 +139,9 @@ pub struct DataSourceVariable {
     pub(crate) refresh: VariableRefresh,
     pub(crate) hidden: bool,
     pub(crate) skip_url_sync: bool,
+    /// Problems `VariableBuilder` found while producing this variable.
+    /// Never serialized; validation reports them.
+    pub(crate) diagnostics: Vec<VariableDiagnostic>,
 }
 
 impl DataSourceVariable {
@@ -128,6 +152,7 @@ impl DataSourceVariable {
         Self {
             name: name.into(),
             label: None,
+            diagnostics: Vec::new(),
             plugin_id: plugin_id.into(),
             current: None,
             regex: String::new(),
@@ -205,6 +230,9 @@ pub struct QueryVariable {
     pub(crate) sort: VariableSort,
     pub(crate) hidden: bool,
     pub(crate) refresh: VariableRefresh,
+    /// Problems `VariableBuilder` found while producing this variable.
+    /// Never serialized; validation reports them.
+    pub(crate) diagnostics: Vec<VariableDiagnostic>,
 }
 
 impl QueryVariable {
@@ -212,6 +240,7 @@ impl QueryVariable {
     #[must_use]
     pub fn new(name: impl Into<String>, query: impl Into<Query>) -> Self {
         Self {
+            diagnostics: Vec::new(),
             name: name.into(),
             label: None,
             query: query.into(),
@@ -335,10 +364,9 @@ pub struct CustomVariable {
     pub(crate) allow_custom_value: bool,
     pub(crate) skip_url_sync: bool,
     pub(crate) hidden: bool,
-    /// Options set on the builder that this kind has no Grafana key
-    /// for. Never serialized; validation reports them so they cannot be
-    /// dropped silently.
-    pub(crate) inapplicable: Vec<&'static str>,
+    /// Problems `VariableBuilder` found while producing this variable.
+    /// Never serialized; validation reports them.
+    pub(crate) diagnostics: Vec<VariableDiagnostic>,
 }
 
 impl CustomVariable {
@@ -349,7 +377,7 @@ impl CustomVariable {
         values: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         Self {
-            inapplicable: Vec::new(),
+            diagnostics: Vec::new(),
             name: name.into(),
             label: None,
             values: values.into_iter().map(Into::into).collect(),
@@ -435,10 +463,9 @@ pub struct ConstantVariable {
     pub(crate) label: Option<String>,
     pub(crate) value: String,
     pub(crate) hidden: bool,
-    /// Options set on the builder that this kind has no Grafana key
-    /// for. Never serialized; validation reports them so they cannot be
-    /// dropped silently.
-    pub(crate) inapplicable: Vec<&'static str>,
+    /// Problems `VariableBuilder` found while producing this variable.
+    /// Never serialized; validation reports them.
+    pub(crate) diagnostics: Vec<VariableDiagnostic>,
 }
 
 impl ConstantVariable {
@@ -446,7 +473,7 @@ impl ConstantVariable {
     #[must_use]
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
-            inapplicable: Vec::new(),
+            diagnostics: Vec::new(),
             name: name.into(),
             label: None,
             value: value.into(),
@@ -535,6 +562,7 @@ pub struct VariableBuilder {
     include_all: bool,
     hidden: bool,
     refresh: VariableRefresh,
+    plugin: Option<String>,
     regex: Option<String>,
     sort: Option<VariableSort>,
     all_value: Option<String>,
@@ -559,6 +587,7 @@ impl VariableBuilder {
             include_all: false,
             hidden: false,
             refresh: VariableRefresh::OnDashboardLoad,
+            plugin: None,
             regex: None,
             sort: None,
             all_value: None,
@@ -638,6 +667,17 @@ impl VariableBuilder {
         self
     }
 
+    /// Selects a datasource variable over the given Grafana plugin id
+    /// (for example `"prometheus"` or `"loki"`).
+    ///
+    /// Distinct from [`Self::datasource`], which sets the datasource a
+    /// *query* variable runs against. This one chooses the variable's kind.
+    #[must_use]
+    pub fn plugin(mut self, plugin_id: impl Into<String>) -> Self {
+        self.plugin = Some(plugin_id.into());
+        self
+    }
+
     /// Restricts a query or datasource variable's values with a regex.
     ///
     /// Custom and constant variables have no `regex` key in Grafana, so
@@ -687,32 +727,95 @@ impl VariableBuilder {
         self
     }
 
-    /// Produces the selected typed variable. If no selector was supplied, an
-    /// empty custom variable is emitted so validation and Grafana can surface
-    /// the incomplete definition without a macro panic.
+    /// Resolves the accumulated fields into a concrete variable.
+    ///
+    /// The kind is chosen by which selector was set: `query`, `plugin`,
+    /// `value` (constant), or `values` (custom). A builder with none of them,
+    /// or with more than one, still produces a variable rather than panicking
+    /// inside a macro expansion — it records the problem, and validation
+    /// turns it into an error before serialization.
     #[must_use]
     pub fn build(self) -> Variable {
-        // Recorded before the kind is resolved, so a `regex`/`sort` set on a
-        // builder that turns out to be custom or constant is reported by
-        // validation instead of vanishing. Grafana emits no such key for
-        // those kinds, so there is nothing to lower them onto.
-        let mut inapplicable = Vec::new();
-        if self.regex.is_some() {
-            inapplicable.push("regex");
+        // The selector carries its own payload, so the kind is decided exactly
+        // once and there is no second match to fall out of step with the
+        // first. The previous shape was a chain ending in a catch-all `else`,
+        // which silently turned anything unrecognised into an empty custom
+        // variable — that is how asking for a datasource variable produced a
+        // custom one with no warning.
+        enum Selected {
+            Query(Box<Query>),
+            Plugin(String),
+            Constant(String),
+            Custom(Vec<String>),
         }
-        if self.sort.is_some() {
-            inapplicable.push("sort");
-        }
+
+        let mut diagnostics = Vec::new();
+        let mut candidates: Vec<(&'static str, Selected)> = Vec::new();
         if let Some(query) = self.query {
-            let current = self.current.clone().or_else(|| {
-                self.default
-                    .clone()
-                    .map(|value| VariableSelection::new(value.clone(), value))
-            });
-            Variable::Query(Box::new(QueryVariable {
+            candidates.push(("query", Selected::Query(Box::new(query))));
+        }
+        if let Some(plugin) = self.plugin {
+            candidates.push(("plugin", Selected::Plugin(plugin)));
+        }
+        if let Some(value) = self.constant {
+            candidates.push(("value", Selected::Constant(value)));
+        }
+        if !self.values.is_empty() {
+            candidates.push(("values", Selected::Custom(self.values)));
+        }
+
+        let mut candidates = candidates.into_iter();
+        let Some((chosen, selected)) = candidates.next() else {
+            diagnostics.push(VariableDiagnostic::NoSelector);
+            return Variable::Custom(CustomVariable {
+                diagnostics,
                 name: self.name,
                 label: self.label,
-                query,
+                values: Vec::new(),
+                current: None,
+                multi: false,
+                include_all: false,
+                all_value: None,
+                allow_custom_value: false,
+                skip_url_sync: false,
+                hidden: self.hidden,
+            });
+        };
+        for (ignored, _) in candidates {
+            diagnostics.push(VariableDiagnostic::ConflictingSelectors { chosen, ignored });
+        }
+
+        let mut not_applicable = |set: bool, option: &'static str| {
+            if set {
+                diagnostics.push(VariableDiagnostic::OptionNotApplicable(option));
+            }
+        };
+        match selected {
+            Selected::Query(_) => {}
+            Selected::Plugin(_) => {
+                not_applicable(self.sort.is_some(), "sort");
+                not_applicable(self.all_value.is_some(), "all_value");
+                not_applicable(self.allow_custom_value, "allow_custom_value");
+                not_applicable(self.multi, "multi");
+                not_applicable(self.include_all, "include_all");
+            }
+            Selected::Constant(_) | Selected::Custom(_) => {
+                not_applicable(self.regex.is_some(), "regex");
+                not_applicable(self.sort.is_some(), "sort");
+            }
+        }
+
+        let current = self.current.or_else(|| {
+            self.default
+                .map(|value| VariableSelection::new(value.clone(), value))
+        });
+
+        match selected {
+            Selected::Query(query) => Variable::Query(Box::new(QueryVariable {
+                diagnostics,
+                name: self.name,
+                label: self.label,
+                query: *query,
                 current,
                 datasource: self.datasource,
                 multi: self.multi,
@@ -728,26 +831,30 @@ impl VariableBuilder {
                 sort: self.sort.unwrap_or(VariableSort::AlphabeticalAscending),
                 hidden: self.hidden,
                 refresh: self.refresh,
-            }))
-        } else if let Some(value) = self.constant {
-            Variable::Constant(ConstantVariable {
-                inapplicable,
+            })),
+            Selected::Plugin(plugin_id) => Variable::DataSource(DataSourceVariable {
+                diagnostics,
+                name: self.name,
+                label: self.label,
+                plugin_id,
+                current,
+                regex: self.regex.unwrap_or_default(),
+                refresh: self.refresh,
+                hidden: self.hidden,
+                skip_url_sync: self.skip_url_sync,
+            }),
+            Selected::Constant(value) => Variable::Constant(ConstantVariable {
+                diagnostics,
                 name: self.name,
                 label: self.label,
                 value,
                 hidden: self.hidden,
-            })
-        } else {
-            let current = self.current.clone().or_else(|| {
-                self.default
-                    .clone()
-                    .map(|value| VariableSelection::new(value.clone(), value))
-            });
-            Variable::Custom(CustomVariable {
-                inapplicable,
+            }),
+            Selected::Custom(values) => Variable::Custom(CustomVariable {
+                diagnostics,
                 name: self.name,
                 label: self.label,
-                values: self.values,
+                values,
                 current,
                 multi: self.multi,
                 include_all: self.include_all,
@@ -755,7 +862,7 @@ impl VariableBuilder {
                 allow_custom_value: self.allow_custom_value,
                 skip_url_sync: self.skip_url_sync,
                 hidden: self.hidden,
-            })
+            }),
         }
     }
 }

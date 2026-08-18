@@ -1132,3 +1132,114 @@ fn variable_options_that_do_not_apply_are_reported_not_dropped() {
         "{rendered}"
     );
 }
+
+/// Closes issue #14: the DSL can now produce a datasource variable, and the
+/// `plugin:` selector is distinct from `datasource:`.
+#[test]
+fn datasource_variable_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Sources";
+        variable "source" {
+            plugin: "prometheus";
+            label: "Data source";
+            regex: "prod-.*";
+            skip_url_sync: true;
+            refresh: time_range;
+            current "Main" => "prometheus-main" { selected: false; }
+        }
+    };
+
+    let from_builder = Dashboard::new("Sources").variable(
+        VariableBuilder::new("source")
+            .plugin("prometheus")
+            .label("Data source")
+            .regex("prod-.*")
+            .skip_url_sync(true)
+            .refresh(VariableRefresh::OnTimeRangeChange)
+            .current(VariableSelection::new("Main", "prometheus-main").selected(false))
+            .build(),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// Pins the wire shape. `type` and `query` are what distinguish a datasource
+/// variable from the custom one this used to silently produce.
+#[test]
+fn datasource_variable_emits_the_grafana_wire_values() {
+    let dashboard = dashboard! {
+        title: "Sources";
+        variable "source" {
+            plugin: "prometheus";
+            regex: "prod-.*";
+            skip_url_sync: true;
+            current "Main" => "prometheus-main";
+        }
+    };
+    let json: serde_json::Value = serde_json::from_str(&dashboard.to_json().unwrap()).unwrap();
+    let variable = &json["templating"]["list"][0];
+
+    assert_eq!(variable["type"], json!("datasource"));
+    assert_eq!(variable["query"], json!("prometheus"));
+    assert_eq!(variable["regex"], json!("prod-.*"));
+    assert_eq!(variable["skipUrlSync"], json!(true));
+    assert_eq!(
+        variable["current"],
+        json!({"selected": true, "text": "Main", "value": "prometheus-main"})
+    );
+}
+
+/// `datasource:` sets the datasource a QUERY variable runs against. It must
+/// keep meaning that, and must not select the variable's kind.
+#[test]
+fn datasource_option_still_configures_a_query_variable() {
+    let dashboard = dashboard! {
+        title: "Sources";
+        variable "instance" {
+            query: promql!("label_values(up, instance)");
+            datasource: prometheus("prometheus-main");
+        }
+    };
+    let json: serde_json::Value = serde_json::from_str(&dashboard.to_json().unwrap()).unwrap();
+    let variable = &json["templating"]["list"][0];
+
+    assert_eq!(variable["type"], json!("query"));
+    assert_eq!(variable["datasource"]["uid"], json!("prometheus-main"));
+}
+
+/// The defect this issue was filed for: a variable whose only option was
+/// `datasource:` used to serialize cleanly as an empty CUSTOM variable.
+/// Every degenerate selector combination now fails before serialization.
+#[test]
+fn variable_selector_mistakes_are_reported_not_guessed() {
+    let cases = [
+        (
+            dashboard! { title: "t"; variable "d" { datasource: prometheus("p"); } },
+            "no selector",
+        ),
+        (
+            dashboard! { title: "t"; variable "x" { label: "nothing"; } },
+            "no selector",
+        ),
+        (
+            dashboard! { title: "t"; variable "b" { query: promql!("up"); plugin: "prometheus"; } },
+            "plugin is ignored because query already selected the kind",
+        ),
+        (
+            dashboard! { title: "t"; variable "s" { plugin: "prometheus"; sort: numerical_desc; } },
+            "sort does not apply to a datasource variable",
+        ),
+    ];
+    for (dashboard, expected) in cases {
+        let error = dashboard.to_json().expect_err("must not serialize");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains(expected),
+            "expected {expected:?} in {rendered:?}"
+        );
+    }
+}

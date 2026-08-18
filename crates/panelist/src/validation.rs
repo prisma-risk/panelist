@@ -180,6 +180,24 @@ pub enum ValidationError {
         /// The variable kind it resolved to.
         kind: &'static str,
     },
+    /// A variable definition set no selector, so its kind is undetermined.
+    #[error("variable \"{variable}\": no selector — set one of query, plugin, value, or values")]
+    MissingVariableSelector {
+        /// Variable name.
+        variable: String,
+    },
+    /// A variable definition set more than one kind selector.
+    #[error(
+        "variable \"{variable}\": {ignored} is ignored because {chosen} already selected the kind"
+    )]
+    ConflictingVariableSelectors {
+        /// Variable name.
+        variable: String,
+        /// The selector that decided the kind.
+        chosen: &'static str,
+        /// The selector that was ignored.
+        ignored: &'static str,
+    },
     /// A transformation is missing a required field name.
     #[error("panel \"{panel}\": {transformation} transformation requires a field name")]
     MissingTransformationField {
