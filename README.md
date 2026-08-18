@@ -48,41 +48,11 @@ Panelist is under active development. Add the current release from crates.io:
 
 ```toml
 [dependencies]
-panelist = "0.2"
+panelist = "0.3.0"
 ```
 
 The minimum supported Rust version is 1.96. Panelist uses Rust 2024 and has no
 async runtime or network client dependency.
-
-### Breaking changes since 0.2
-
-The following have landed since the 0.2.0 release and are not yet part of
-any published version; they will be reflected in the next release's number
-per [semver](https://semver.org/) and the project's
-[release process](CONTRIBUTING.md#releases).
-
-- `LegendCalculation` was renamed to `Reducer`. Grafana calls this vocabulary
-  `ReducerID`, and Panelist already used it outside legends for
-  `ReduceOptions` on stat, gauge, and bar-gauge panels.
-- `PanelBuilder::legend_options` moved from every panel kind to
-  `PanelBuilder<TimeseriesKind>` only. It only ever affected time-series
-  panels; calling it on a `Stat`, `Gauge`, `Table`, `Text`, or `BarGauge`
-  builder used to compile and silently emit nothing.
-- `FieldConfig::cell()` was removed. Set a table's default cell renderer with
-  `PanelBuilder<TableKind>::cell` instead, which now stores it as typed table
-  options so it survives a later `.field_config()` call the way `.sort_by()`
-  already did.
-- The query legend-format setter was renamed from `legend` to
-  `legend_format`, on `PrometheusQuery`, `LokiQuery`, `RawQuery`, and
-  `PanelBuilder`, and the DSL key `legend:` became `legend_format:` in both
-  the panel body and a query body. Call `legend_format` instead. It sets the
-  datasource's `legendFormat` series-name template and had nothing to do with
-  the visualization legend, which keeps its own names: `legend_options` on the
-  builder and `legend { … }` in the DSL.
-- `TableSort` and `TransformationFilter` narrowed from `pub` to `pub(crate)`
-  and were removed from the prelude. Neither type was ever constructible or
-  acceptable as a parameter from outside the crate, so no external caller
-  should notice.
 
 ## Macro DSL
 
@@ -127,9 +97,8 @@ let dashboard = dashboard! {
 ```
 
 The DSL supports `timeseries`, `stat`, `gauge`, `table`, `text`, `bar_gauge`,
-and `heatmap` panels, and every one of the seven now works identically at
-both dashboard level and row level. `promql!` and `loki!` create typed query
-builders rather than opaque JSON values.
+and `heatmap` panels at both dashboard and row level. `promql!` and `loki!`
+create typed query builders rather than opaque JSON values.
 
 Dashboard links, cursor sync, and the full variable surface are reachable
 too:
@@ -275,16 +244,19 @@ let dashboard = dashboard! {
 # let _ = dashboard;
 ```
 
-`transform` accepts `join_by_field`, `sort_by`, `organize`,
-`time_series_to_table`, and `labels_to_fields`, each optionally scoped with
-`only ref_id(..)`; a `transform: <expr>;` escape hatch takes a hand-built
-`RawTransformation` or `Transformation` value for anything else. `override`
-matches fields with `field(name)`, `regex(pattern)`, `type(field_type)`,
-`query(ref_id)`, `names([..])`, `numeric`, or `time`, and can set `cell: auto
-| colored_text | colored_background | gauge | sparkline`, with block forms —
-`colored_background { .. }` and `sparkline { .. }` — when the cell type takes
-its own options. A table panel can also set its own default cell renderer
-with a bare `cell: <type>;` at the panel level.
+Table configuration stays typed throughout:
+
+- Transformations: `join_by_field`, `sort_by`, `organize`,
+  `time_series_to_table`, and `labels_to_fields`. Scope any of them to one
+  query with `only ref_id(..)`.
+- Field matchers: `field(name)`, `regex(pattern)`, `type(field_type)`,
+  `query(ref_id)`, `names([..])`, `numeric`, and `time`.
+- Cell renderers: `auto`, `colored_text`, `colored_background`, `gauge`, and
+  `sparkline`. Renderers with their own options also have block forms.
+
+Set a default renderer with `cell: <type>;` on the table, or set one inside an
+`override` for selected fields. For transformations Panelist does not model,
+`transform: <expr>;` accepts a `RawTransformation` or `Transformation` value.
 
 Heatmap panels configure their color scale and Y axis directly:
 
@@ -339,18 +311,21 @@ let dashboard = Dashboard::new("HTTP")
 # let _ = dashboard;
 ```
 
-Typed models cover dashboard metadata, rows, datasources, Prometheus and Loki
-queries, Prometheus result formats (time series, table, heatmap),
-datasource/query/custom/constant variables, persisted variable state, time
-ranges, links, field defaults, value mappings, thresholds, legends, field
-overrides and their matchers (`byName`, `byRegexp`, `byType`, `byFrameRefID`,
-`byNames`, `numeric`, and `time`), panel transformations (join, sort,
-organize, time-series-to-table, and labels-to-fields), typed table cell
-rendering (colored text, colored background, gauge, sparkline) and column
-sorting, typed heatmap options, and common stat, time-series, gauge, and
-bar-gauge options. `RawQuery`, `RawPanel`, `RawTransformation`, and ordered
-`extra`/`option`/`custom` methods provide explicit escape hatches for Grafana
-features that Panelist does not model yet.
+The typed API covers:
+
+- dashboards, rows, datasources, time ranges, links, and persisted variable
+  state;
+- Prometheus and Loki queries, including time-series, table, and heatmap
+  result formats;
+- datasource, query, custom, and constant variables;
+- field defaults, value mappings, thresholds, legends, overrides, and field
+  matchers;
+- transformations, table cells and sorting, heatmaps, and the common options
+  for stat, time-series, gauge, and bar-gauge panels.
+
+When Grafana supports something Panelist does not model yet, use `RawQuery`,
+`RawPanel`, `RawTransformation`, or the ordered `extra`, `option`, and `custom`
+methods.
 
 Real-world provisioning metadata and visualization choices remain typed:
 
@@ -453,14 +428,14 @@ panicking.
 
 ## Grafana compatibility
 
-Panelist 0.2 emits Grafana Classic dashboard JSON with schema version 41. This
-is deliberate: Classic remains importable/exportable in Grafana 13, works with
-file provisioning, and retains the numeric panel IDs and `gridPos` behavior
-that Panelist automates. Grafana's newer V2 resource model uses a different
-layout representation.
+Panelist emits Grafana Classic dashboard JSON with schema version 41. Classic
+remains importable and exportable in Grafana 13, works with file provisioning,
+and retains the numeric panel IDs and `gridPos` behavior that Panelist
+automates. Grafana's newer V2 resource model uses a different layout
+representation.
 
 The authoring model, layout/normalization pass, and Grafana serialization model
-are separate modules so a future V2 serializer does not have to break the DSL or
+are separate modules so a future V2 serializer can preserve the DSL and
 builders. See [the schema strategy](https://github.com/prisma-risk/panelist/blob/main/docs/schema-compatibility.md)
 for scope and references.
 
