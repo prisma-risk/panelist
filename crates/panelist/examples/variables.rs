@@ -21,11 +21,18 @@
 //  limitations under the License.
 //
 
+// Examples print the dashboard JSON so that `cargo run --example <name>`
+// is useful on its own, and so the demo stack in `examples/demo` can
+// provision the very same dashboards a reader builds. The workspace
+// otherwise denies printing to stdout.
+#![allow(clippy::print_stdout)]
+
 use panelist::prelude::*;
 
 fn main() -> panelist::Result<()> {
     let dashboard = dashboard! {
         title: "Variables";
+        uid: "variables";
         datasource: prometheus("prometheus");
 
         variable "environment" {
@@ -48,6 +55,7 @@ fn main() -> panelist::Result<()> {
         }
     };
 
-    let _json = dashboard.to_json_pretty()?;
+    dashboard.validate()?;
+    println!("{}", dashboard.to_json_pretty()?);
     Ok(())
 }
