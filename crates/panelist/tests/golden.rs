@@ -53,7 +53,7 @@ fn golden_dashboard() -> Dashboard {
 
             timeseries "Traffic" {
                 query: promql!("sum by (status) (rate(requests_total[$__rate_interval]))") {
-                    legend: "{{status}}";
+                    legend_format: "{{status}}";
                 }
                 unit: reqps;
                 width: 16;
@@ -128,13 +128,13 @@ fn route_performance_dashboard() -> Dashboard {
         row "Traffic" {
             timeseries "Request rate by status" {
                 query: promql!("sum(rate(http_requests_total{status=~\"2..\"}[$__rate_interval]))") {
-                    legend: "2xx";
+                    legend_format: "2xx";
                 }
                 query: promql!("sum(rate(http_requests_total{status=~\"4..\"}[$__rate_interval]))") {
-                    legend: "4xx";
+                    legend_format: "4xx";
                 }
                 query: promql!("sum(rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))") {
-                    legend: "5xx";
+                    legend_format: "5xx";
                 }
                 unit: reqps;
                 width: 12;
@@ -143,7 +143,7 @@ fn route_performance_dashboard() -> Dashboard {
 
             bar_gauge "Top routes by traffic" {
                 query: promql!("topk(10, sum by (route) (rate(http_requests_total[$__rate_interval])))") {
-                    legend: "{{route}}";
+                    legend_format: "{{route}}";
                     instant: true;
                 }
                 unit: reqps;
@@ -277,7 +277,7 @@ fn route_performance_dashboard() -> Dashboard {
         row "Latency" {
             timeseries "p95 by route" {
                 query: promql!("topk(5, histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval]))))") {
-                    legend: "{{route}}";
+                    legend_format: "{{route}}";
                 }
                 unit: seconds;
                 width: 12;
@@ -340,63 +340,448 @@ fn route_performance_matches_the_committed_golden_file() {
     assert_eq!(actual, expected);
 }
 
-/// Collapses runs of whitespace (spaces, tabs, newlines) into a single
-/// space so the escape-hatch grep below can't be defeated by reformatting
-/// tricks like `option  "custom_flag" : true;` — rustfmt does not reformat
-/// the inside of macro invocations it doesn't recognize, so extra
-/// whitespace there survives `cargo fmt --check` untouched.
-fn normalize_whitespace(source: &str) -> String {
-    let mut normalized = String::with_capacity(source.len());
-    let mut in_whitespace = false;
-    for ch in source.chars() {
-        if ch.is_whitespace() {
-            if !in_whitespace {
-                normalized.push(' ');
+// ---------------------------------------------------------------------------
+// The "no raw Grafana JSON" guard.
+//
+// This is the test standing behind the owner's hard gate on the acceptance
+// dashboard. It has been walked past twice — once with whitespace, once with
+// a raw-string key — so it no longer pattern-matches call syntax at all.
+// Instead it classifies the source into code and not-code, then looks for the
+// *identifiers* an escape hatch cannot be written without. Three properties
+// make that hard to evade:
+//
+//   1. Comments are classified as not-code, so `option /* hi */ "k": v;`
+//      still reads as the identifier `option` sitting in code.
+//   2. String and character literal *contents* are classified as not-code,
+//      so a raw string cannot smuggle a key past a `"`-anchored pattern —
+//      and, symmetrically, the forbidden identifiers written as string
+//      literals in this very file do not trip the guard when it scans
+//      itself.
+//   3. Whole files are scanned, not an extracted function body, so a hatch
+//      in a helper that the dashboard calls is still in range.
+//
+// Property 2 is what lets property 3 work: the guard can scan its own source
+// because everything distinctive about it lives inside string literals.
+// ---------------------------------------------------------------------------
+
+/// One source character: its byte offset, the character, and whether it is
+/// code rather than part of a comment or of a string/char literal's
+/// contents. Delimiters (`//`, `/*`, `"`, `'`, `#`) count as not-code; only
+/// real tokens survive.
+struct Classified {
+    offset: usize,
+    ch: char,
+    is_code: bool,
+}
+
+fn is_identifier_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+/// Splits Rust source into code and not-code. Handles line comments, nested
+/// block comments, normal and byte strings with backslash escapes, raw
+/// strings of any hash depth, and character literals — while leaving
+/// lifetimes (`'a`) alone, which would otherwise desynchronize the scan.
+fn classify(source: &str) -> Vec<Classified> {
+    let chars: Vec<(usize, char)> = source.char_indices().collect();
+    let mut out: Vec<Classified> = Vec::with_capacity(chars.len());
+    let mut index = 0usize;
+
+    let peek = |at: usize| chars.get(at).map(|(_, ch)| *ch);
+    let take = |out: &mut Vec<Classified>, at: usize, is_code: bool| {
+        let (offset, ch) = chars[at];
+        out.push(Classified {
+            offset,
+            ch,
+            is_code,
+        });
+    };
+
+    while index < chars.len() {
+        let ch = chars[index].1;
+
+        if ch == '/' && peek(index + 1) == Some('/') {
+            while index < chars.len() && chars[index].1 != '\n' {
+                take(&mut out, index, false);
+                index += 1;
             }
-            in_whitespace = true;
+            continue;
+        }
+
+        if ch == '/' && peek(index + 1) == Some('*') {
+            let mut depth = 0usize;
+            while index < chars.len() {
+                if chars[index].1 == '/' && peek(index + 1) == Some('*') {
+                    depth += 1;
+                    take(&mut out, index, false);
+                    take(&mut out, index + 1, false);
+                    index += 2;
+                    continue;
+                }
+                if chars[index].1 == '*' && peek(index + 1) == Some('/') {
+                    depth -= 1;
+                    take(&mut out, index, false);
+                    take(&mut out, index + 1, false);
+                    index += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                    continue;
+                }
+                take(&mut out, index, false);
+                index += 1;
+            }
+            continue;
+        }
+
+        // Raw string: `r"…"`, `r#"…"#`, `br##"…"##`. The `r` must start a
+        // token, otherwise it is just a letter inside an identifier.
+        let starts_token = index == 0 || !is_identifier_char(chars[index - 1].1);
+        let raw_start = if starts_token && ch == 'r' {
+            Some(index + 1)
+        } else if starts_token && ch == 'b' && peek(index + 1) == Some('r') {
+            Some(index + 2)
         } else {
-            normalized.push(ch);
-            in_whitespace = false;
+            None
+        };
+        if let Some(after_prefix) = raw_start {
+            let mut hashes = after_prefix;
+            while peek(hashes) == Some('#') {
+                hashes += 1;
+            }
+            if peek(hashes) == Some('"') {
+                let depth = hashes - after_prefix;
+                while index <= hashes {
+                    take(&mut out, index, false);
+                    index += 1;
+                }
+                'raw: while index < chars.len() {
+                    if chars[index].1 == '"'
+                        && (1..=depth).all(|step| peek(index + step) == Some('#'))
+                    {
+                        for step in 0..=depth {
+                            take(&mut out, index + step, false);
+                        }
+                        index += depth + 1;
+                        break 'raw;
+                    }
+                    take(&mut out, index, false);
+                    index += 1;
+                }
+                continue;
+            }
+        }
+
+        // Normal or byte string.
+        if ch == '"' || (ch == 'b' && peek(index + 1) == Some('"') && starts_token) {
+            if ch == 'b' {
+                take(&mut out, index, false);
+                index += 1;
+            }
+            take(&mut out, index, false);
+            index += 1;
+            while index < chars.len() {
+                if chars[index].1 == '\\' {
+                    take(&mut out, index, false);
+                    if index + 1 < chars.len() {
+                        take(&mut out, index + 1, false);
+                    }
+                    index += 2;
+                    continue;
+                }
+                let closing = chars[index].1 == '"';
+                take(&mut out, index, false);
+                index += 1;
+                if closing {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        // Character literal, but not a lifetime: `'a'` and `'\n'` are
+        // literals, `'a` on its own is a lifetime and stays code.
+        if ch == '\''
+            && (peek(index + 1) == Some('\\')
+                || (peek(index + 1).is_some() && peek(index + 2) == Some('\'')))
+        {
+            take(&mut out, index, false);
+            index += 1;
+            while index < chars.len() {
+                if chars[index].1 == '\\' {
+                    take(&mut out, index, false);
+                    if index + 1 < chars.len() {
+                        take(&mut out, index + 1, false);
+                    }
+                    index += 2;
+                    continue;
+                }
+                let closing = chars[index].1 == '\'';
+                take(&mut out, index, false);
+                index += 1;
+                if closing {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        take(&mut out, index, true);
+        index += 1;
+    }
+
+    out
+}
+
+/// The source with everything that is not code replaced by spaces, so a
+/// scan cannot see inside comments or literals.
+///
+/// A blanked character is replaced by as many spaces as it occupied bytes,
+/// which keeps byte offsets identical to the original — the license header's
+/// box-drawing art is multi-byte, and `dashboard_block` slices the original
+/// source using offsets found here.
+fn code_only(source: &str) -> String {
+    let mut blanked = String::with_capacity(source.len());
+    for entry in classify(source) {
+        if entry.is_code {
+            blanked.push(entry.ch);
+        } else {
+            for _ in 0..entry.ch.len_utf8() {
+                blanked.push(' ');
+            }
         }
     }
-    normalized
+    debug_assert_eq!(blanked.len(), source.len());
+    blanked
+}
+
+/// Whether `identifier` appears in `code` as a whole token rather than as
+/// part of a longer one — so `option` does not match `legend_options`, and
+/// `json` does not match `serde_json`.
+fn contains_identifier(code: &str, identifier: &str) -> bool {
+    code.match_indices(identifier).any(|(at, _)| {
+        let before = code[..at].chars().next_back();
+        let after = code[at + identifier.len()..].chars().next();
+        !before.is_some_and(is_identifier_char) && !after.is_some_and(is_identifier_char)
+    })
+}
+
+/// Every escape hatch that can put author-supplied JSON into a dashboard,
+/// named by an identifier it cannot be written without.
+///
+/// The three `Raw*` types and `Custom` are the hatches themselves.
+/// `option` and `extra` cover both the builder methods and the DSL keys.
+/// `json`, `serde_json`, and `Value` cover the value side: every remaining
+/// hatch — `FieldConfig::custom` in particular — takes a `serde_json::Value`,
+/// and a typed dashboard has no other reason to name serde_json at all.
+///
+/// Deliberately absent: bare `custom`, because `unit: custom("USD")` and
+/// `Unit::custom(…)` are legitimate typed API. `FieldConfig::custom` is
+/// caught by the dotted-call check below instead.
+const RAW_JSON_IDENTIFIERS: &[&str] = &[
+    "option",
+    "extra",
+    "Custom",
+    "json",
+    "serde_json",
+    "Value",
+    "RawPanel",
+    "RawQuery",
+    "RawTransformation",
+];
+
+/// Returns every escape hatch `source` reaches for. Empty means clean.
+fn raw_escape_hatches(source: &str) -> Vec<String> {
+    let code = code_only(source);
+    let mut found: Vec<String> = RAW_JSON_IDENTIFIERS
+        .iter()
+        .filter(|identifier| contains_identifier(&code, identifier))
+        .map(|identifier| (*identifier).to_owned())
+        .collect();
+
+    // `FieldConfig::custom(…)`, matched on the receiver dot so that
+    // `Unit::custom(…)` and the DSL's `unit: custom(…)` stay legal. Spaces
+    // are stripped first, so `. custom (` cannot slip through.
+    let dense: String = code.chars().filter(|ch| !ch.is_whitespace()).collect();
+    if dense.contains(".custom(") {
+        found.push(".custom(".to_owned());
+    }
+    found
 }
 
 fn assert_no_raw_escape_hatches(label: &str, source: &str) {
-    let normalized = normalize_whitespace(source);
-    for hatch in [
-        "option \"", // DSL:     option "key": value;
-        ".option(",  // builder: .option("key", json!(…))
-        "extra \"",  // DSL:     extra "key": value;
-        ".extra(",   // builder: .extra("key", json!(…))
-        ".custom(",  // builder: FieldConfig::custom("key", json!(…))
-        "RawPanel",
-        "RawQuery",
-        "RawTransformation",
-    ] {
-        assert!(
-            !normalized.contains(hatch),
-            "{label} must not use the {hatch} escape hatch"
-        );
-    }
+    let found = raw_escape_hatches(source);
+    assert!(
+        found.is_empty(),
+        "{label} must not use raw Grafana JSON, but reaches for: {}",
+        found.join(", ")
+    );
 }
 
 #[test]
 fn route_performance_uses_no_raw_escape_hatches() {
-    // Covers the dashboard as defined in this test file...
-    let source = include_str!("golden.rs");
-    let dashboard = source
-        .split("fn route_performance_dashboard")
-        .nth(1)
-        .expect("acceptance dashboard should be defined");
-    let body = &dashboard[..dashboard.find("\n}\n").expect("function should close")];
-    assert_no_raw_escape_hatches("the acceptance dashboard", body);
+    // The whole of this file, not just the acceptance dashboard's function
+    // body: an escape hatch in a helper the dashboard calls, or in a
+    // `panels:` fragment built elsewhere, used to be entirely out of range.
+    assert_no_raw_escape_hatches(
+        "the acceptance dashboard's test file",
+        include_str!("golden.rs"),
+    );
 
     // ...and the hand-maintained example, which is the artifact a user
     // actually runs and copies from. It duplicates the same `dashboard!`
     // invocation rather than importing it (examples cannot import from
     // `tests/`), so nothing here otherwise guards it against drifting to
     // include an escape hatch of its own.
-    let example_source = include_str!("../examples/route_performance.rs");
-    assert_no_raw_escape_hatches("the route_performance example", example_source);
+    assert_no_raw_escape_hatches(
+        "the route_performance example",
+        include_str!("../examples/route_performance.rs"),
+    );
+}
+
+/// Each of these walked past the previous guard, which pattern-matched call
+/// syntax on a whitespace-collapsed copy of an extracted function body. They
+/// were confirmed to slip through it before this one was written; the
+/// raw-string form was additionally confirmed to compile and reach the
+/// emitted JSON.
+#[test]
+fn the_escape_hatch_guard_catches_known_evasions() {
+    for (label, attack) in [
+        (
+            "raw-string DSL key",
+            r###"stat "S" { query: promql!("up"); option r"smuggled": true; }"###,
+        ),
+        (
+            "hashed raw-string DSL key",
+            r####"stat "S" { extra r#"smuggled"#: true; }"####,
+        ),
+        (
+            "comment between the keyword and its key",
+            r###"stat "S" { option /* nothing to see */ "smuggled": true; }"###,
+        ),
+        (
+            "comment inside a builder call",
+            r###"Stat::new("S").option /* hi */ ("smuggled", json!(true))"###,
+        ),
+        (
+            "hatch in a helper rather than the dashboard body",
+            r###"
+fn route_performance_dashboard() -> Dashboard {
+    dashboard! { title: "Clean"; panels: smuggled(); }
+}
+
+fn smuggled() -> Vec<Panel> {
+    vec![Stat::new("S").option("smuggled", json!(true)).into()]
+}
+"###,
+        ),
+        (
+            "escape hatch reached through a raw panel",
+            r###"RawPanel::new("piechart", "S")"###,
+        ),
+        (
+            "field custom, spaced out",
+            r###"FieldConfig::new() . custom ("k", v)"###,
+        ),
+        (
+            "typed property escape hatch",
+            r###"FieldOverride::by_name("x").property(OverrideProperty::Custom { id: "k".into(), value: v })"###,
+        ),
+    ] {
+        assert!(
+            !raw_escape_hatches(attack).is_empty(),
+            "the guard must catch the {label} evasion"
+        );
+    }
+}
+
+/// The guard scans real source, so it has to leave real source alone.
+#[test]
+fn the_escape_hatch_guard_allows_legitimate_typed_authoring() {
+    for (label, clean) in [
+        (
+            "a custom unit through the DSL",
+            r###"stat "S" { unit: custom("USD"); }"###,
+        ),
+        (
+            "a custom unit through the builders",
+            r###"Stat::new("S").unit(Unit::custom("USD"))"###,
+        ),
+        (
+            "identifiers that merely contain a forbidden one",
+            r###"Timeseries::new("S").legend_options(Legend::new()).reduce_options(o)"###,
+        ),
+        (
+            "a forbidden identifier appearing only inside a string or comment",
+            r###"
+// This dashboard uses no .option(…) or json! escape hatch.
+let name = "Value #A";
+"###,
+        ),
+        (
+            "a value mapping",
+            r###"Stat::new("S").mapping(ValueMapping::new("0", "Down"))"###,
+        ),
+    ] {
+        assert!(
+            raw_escape_hatches(clean).is_empty(),
+            "the guard must not flag {label}, but flagged: {}",
+            raw_escape_hatches(clean).join(", ")
+        );
+    }
+}
+
+/// The body of the `dashboard!` invocation that follows `marker`, with
+/// braces matched over code only — the acceptance dashboard's PromQL
+/// contains `{…}` inside string literals, which would otherwise close the
+/// block early.
+fn dashboard_block(source: &str, marker: &str) -> String {
+    let classified = classify(source);
+    let code = code_only(source);
+
+    let marker_at = code
+        .find(marker)
+        .unwrap_or_else(|| panic!("source should contain {marker}"));
+    let invocation = code[marker_at..]
+        .find("dashboard!")
+        .map(|at| marker_at + at)
+        .unwrap_or_else(|| panic!("{marker} should be followed by a dashboard! invocation"));
+    let open = code[invocation..]
+        .find('{')
+        .map(|at| invocation + at)
+        .unwrap_or_else(|| panic!("{marker}'s dashboard! should open a block"));
+
+    let mut depth = 0usize;
+    for entry in &classified {
+        if entry.offset < open || !entry.is_code {
+            continue;
+        }
+        match entry.ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return source[open + 1..entry.offset].to_owned();
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("dashboard! block should close");
+}
+
+/// `examples/route_performance.rs` is a hand-maintained copy of the
+/// acceptance dashboard, because an example cannot import from `tests/`.
+/// The duplication is deliberate; letting the two drift apart is not — the
+/// example is what a user runs and copies from, so a fix applied to one and
+/// not the other would ship a dashboard nobody verified.
+#[test]
+fn the_route_performance_example_matches_the_acceptance_dashboard() {
+    let from_test = dashboard_block(include_str!("golden.rs"), "fn route_performance_dashboard");
+    let from_example = dashboard_block(include_str!("../examples/route_performance.rs"), "fn main");
+
+    assert_eq!(
+        from_test, from_example,
+        "the route_performance example has drifted from the acceptance dashboard"
+    );
 }

@@ -36,7 +36,15 @@ cleanup() {
   docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
   rm -rf "${WORK_DIR}"
 }
-trap cleanup EXIT INT TERM
+# `trap cleanup EXIT INT TERM` is NOT enough: on INT/TERM bash runs the
+# handler and then *resumes execution* where it left off, so a killed run
+# tears down its own Grafana, keeps going, and exits 0 — a false PASS, which
+# is worse than the leaked container this trap was added to prevent. The
+# handler has to exit itself. `cleanup` then runs twice (handler, then EXIT
+# trap); it is idempotent, so that is harmless.
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 echo "==> Booting ${GRAFANA_IMAGE} on port ${GRAFANA_PORT}"
 docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
@@ -82,7 +90,8 @@ echo "==> Grafana is healthy"
 # Grafana legitimately adds fields on save (ignored automatically for both
 # categories: the walk only ever visits $sent's paths) and rewrites exactly
 # four: the top-level id, version, and uid, and each panel's pluginVersion.
-# Everything else missing, value-altered (leaves), or retyped (containers)
+# Everything else missing, value-altered (leaves), retyped (containers), or
+# unreachable because an ancestor container came back as a scalar ("blocked")
 # is a genuine problem and gets reported.
 #
 # pluginVersion is excluded for completeness with the four documented
@@ -120,22 +129,48 @@ def is_excluded:
     or ($path == ["uid"])
     or (($path | length) == 3 and $path[0] == "panels" and $path[2] == "pluginVersion");
 
-def exists_at($doc; $path):
-  if ($path | length) == 0 then
-    true
-  else
-    ($doc | getpath($path[0:-1])) as $parent
-    | ($path[-1]) as $key
-    | if $parent == null then
-        false
-      elif ($parent | type) == "object" then
-        $parent | has($key)
-      elif ($parent | type) == "array" then
-        ($key | type) == "number" and $key >= 0 and $key < ($parent | length)
-      else
-        false
-      end
-  end;
+# Resolves $path in $doc one segment at a time, without ever hard-erroring.
+#
+# Deliberately not `getpath`: getpath is null-safe through a *missing* or
+# *null* intermediate, but not through a type mismatch. Indexing through a
+# non-null scalar - `{"a":"hello"} | getpath(["a","b"])` - raises
+# `Cannot index string with string`, and jq exits non-zero. Under
+# `set -euo pipefail` that aborts the whole script: this golden never
+# reports its result, and every golden later in the loop is silently
+# skipped with nothing in the output saying so. That is exactly the shape
+# of drift this script exists to catch - a future Grafana restructuring a
+# nested config sub-object - so it must be reported, not fatal.
+#
+# Emits one of:
+#   {state: "present", value: <value at $path>}
+#   {state: "missing"}
+#   {state: "blocked", at: <path of the scalar ancestor>, actual: <its type>}
+def resolve($doc; $path):
+  reduce range(0; $path | length) as $depth (
+    {state: "present", value: $doc, at: []};
+    if .state != "present" then
+      .
+    else
+      ($path[$depth]) as $seg
+      | .value as $here
+      | (.at + [$seg]) as $next_at
+      | if $here == null then
+          {state: "missing"}
+        elif ($here | type) == "object" then
+          (if ($seg | type) == "string" and ($here | has($seg))
+           then {state: "present", value: $here[$seg], at: $next_at}
+           else {state: "missing"}
+           end)
+        elif ($here | type) == "array" then
+          (if ($seg | type) == "number" and $seg >= 0 and $seg < ($here | length)
+           then {state: "present", value: $here[$seg], at: $next_at}
+           else {state: "missing"}
+           end)
+        else
+          {state: "blocked", at: .at, actual: ($here | type)}
+        end
+    end
+  );
 
 ($sent[0]) as $sent
 | ($got[0]) as $got
@@ -148,28 +183,30 @@ def exists_at($doc; $path):
       [
         $leaf_paths[] as $path
         | ($sent | getpath($path)) as $expected
-        | if (exists_at($got; $path) | not) then
+        | resolve($got; $path) as $found
+        | if $found.state == "blocked" then
+            {path: ($path | path_str), kind: "blocked", expected: $expected,
+             actual: "\($found.actual) at \($found.at | path_str)"}
+          elif $found.state == "missing" then
             {path: ($path | path_str), kind: "dropped", expected: $expected, actual: null}
+          elif $found.value != $expected then
+            {path: ($path | path_str), kind: "altered", expected: $expected, actual: $found.value}
           else
-            ($got | getpath($path)) as $actual
-            | if $actual != $expected then
-                {path: ($path | path_str), kind: "altered", expected: $expected, actual: $actual}
-              else
-                empty
-              end
+            empty
           end
       ] + [
         $container_paths[] as $path
         | ($sent | getpath($path) | type) as $expected_type
-        | if (exists_at($got; $path) | not) then
+        | resolve($got; $path) as $found
+        | if $found.state == "blocked" then
+            {path: ($path | path_str), kind: "blocked", expected: $expected_type,
+             actual: "\($found.actual) at \($found.at | path_str)"}
+          elif $found.state == "missing" then
             {path: ($path | path_str), kind: "dropped", expected: $expected_type, actual: null}
+          elif ($found.value | type) != $expected_type then
+            {path: ($path | path_str), kind: "retyped", expected: $expected_type, actual: ($found.value | type)}
           else
-            ($got | getpath($path) | type) as $actual_type
-            | if $actual_type != $expected_type then
-                {path: ($path | path_str), kind: "retyped", expected: $expected_type, actual: $actual_type}
-              else
-                empty
-              end
+            empty
           end
       ]
     )
@@ -235,7 +272,7 @@ for golden in "${GOLDEN_FILES[@]}"; do
   if [ "${problem_count}" -eq 0 ]; then
     echo "PASS: ${name} — ${leaves_checked} leaf properties and ${containers_checked} empty containers checked, all preserved"
   else
-    echo "FAIL: ${name} — Grafana dropped, altered, or retyped ${problem_count} of $((leaves_checked + containers_checked)) properties (${leaves_checked} leaves, ${containers_checked} empty containers):"
+    echo "FAIL: ${name} — Grafana dropped, altered, retyped, or blocked access to ${problem_count} of $((leaves_checked + containers_checked)) properties (${leaves_checked} leaves, ${containers_checked} empty containers):"
     echo "${result}" | jq -r '.problems[] | "  [\(.kind)] \(.path)\n    expected: \(.expected | tojson)\n    actual:   \(.actual | tojson)"'
     overall_status=1
   fi
@@ -245,7 +282,7 @@ echo
 if [ "${overall_status}" -eq 0 ]; then
   echo "==> All goldens round-tripped through Grafana with every property preserved."
 else
-  echo "==> Grafana dropped, altered, or retyped properties Panelist emitted. See above." >&2
+  echo "==> Grafana dropped, altered, retyped, or blocked access to properties Panelist emitted. See above." >&2
 fi
 
 exit "${overall_status}"

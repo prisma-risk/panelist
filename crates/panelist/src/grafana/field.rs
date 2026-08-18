@@ -171,6 +171,33 @@ pub(crate) fn normalize_override(field_override: &FieldOverride) -> GrafanaField
     // Field matchers, distinct from the frame matchers used by transformation
     // filters (see `grafana/transform.rs`). "which query" is spelled
     // `byFrameRefID` here and `byRefId` there — do not conflate the two.
+    //
+    // Every `options` shape below is the argument type of the matching
+    // `FieldMatcherInfo<T>.get` in Grafana v13.0.2. Grafana stores and
+    // returns an `options` value of the wrong shape untouched and only
+    // ignores it at render time, so neither the golden test nor the
+    // round-trip verifier can catch a mistake here — check the source, not
+    // the JSON:
+    //
+    //   `packages/grafana-data/src/transformations/matchers/nameMatcher.ts`
+    //     byName        `FieldMatcherInfo<string>`, L37-60  — bare string
+    //     byRegexp      `FieldMatcherInfo<string>`, L126-144 — bare string
+    //     byNames       `FieldMatcherInfo<ByNamesMatcherOptions>`, L62-101 —
+    //                   OBJECT. `get` does
+    //                   `const { names, mode = include } = options`, so a
+    //                   bare array yields `names === undefined` and matches
+    //                   zero fields. `mode` is omitted deliberately: it
+    //                   defaults to `include`, which is the only mode this
+    //                   matcher models.
+    //     byFrameRefID  `FieldMatcherInfo<string>`, L151-166 — bare string
+    //
+    //   `packages/grafana-data/src/transformations/matchers/fieldTypeMatcher.ts`
+    //     byType        `FieldMatcherInfo<FieldType>`, L7-22 — bare string;
+    //                   `FieldType` is a string enum
+    //                   (`packages/grafana-data/src/types/dataFrame.ts` L18-33)
+    //     numeric       `FieldMatcherInfo`, L44-56 — `get: () => …` ignores
+    //                   its argument, so the key is omitted
+    //     time          `FieldMatcherInfo`, L59-71 — same
     let matcher = match &field_override.matcher {
         OverrideMatcher::Name(name) => GrafanaMatcher {
             id: "byName",
@@ -190,7 +217,7 @@ pub(crate) fn normalize_override(field_override: &FieldOverride) -> GrafanaField
         },
         OverrideMatcher::Names(names) => GrafanaMatcher {
             id: "byNames",
-            options: Some(json!(names)),
+            options: Some(json!({"names": names})),
         },
         OverrideMatcher::Numeric => GrafanaMatcher {
             id: "numeric",

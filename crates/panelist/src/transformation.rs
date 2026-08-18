@@ -136,6 +136,15 @@ impl OrganizeFields {
 
     /// Orders the listed fields; the nth listed field is assigned index
     /// `n`. Fields left out of the list keep Grafana's natural ordering.
+    ///
+    /// Names are the **final** ones, as they read after [`Self::rename`] —
+    /// the column headers you actually see. Grafana's own `indexByName` is
+    /// keyed on pre-rename names instead, because it orders before it
+    /// renames; Panelist translates for you when it lowers the dashboard.
+    ///
+    /// A name that two renames both produce, or two ordered names that
+    /// resolve to the same underlying field, are authoring errors and fail
+    /// validation rather than silently mis-ordering.
     #[must_use]
     pub fn order(mut self, fields: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.order = fields.into_iter().map(Into::into).collect();
@@ -150,13 +159,24 @@ pub(crate) struct SortByField {
     pub(crate) descending: bool,
 }
 
-/// Sorts rows by one or more fields.
+/// Sorts rows by one field.
 ///
 /// This reorders the data itself and keys on the raw field name. To set
 /// only a table panel's initial sort state, which Grafana keys on the
 /// field's display name, use [`crate::Table::sort_by`] instead.
+///
+/// Grafana sorts by exactly one field. Its `sortBy` options carry an array,
+/// but `packages/grafana-data/src/transformations/transformers/sortBy.ts`
+/// applies only `sort[0]` (L45-53) and says so in the type itself: "this
+/// structure supports an array, however only the first entry is used"
+/// (L17-18). Panelist therefore offers no secondary-sort method — one would
+/// emit JSON Grafana accepts, stores, returns unchanged, and never acts on.
+/// Chain a second [`SortBy`] transformation only if you actually want the
+/// data sorted twice in sequence.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SortBy {
+    /// Always exactly one entry, to match Grafana's array-shaped `sort`
+    /// option while emitting only the entry Grafana reads.
     pub(crate) fields: Vec<SortByField>,
     pub(crate) envelope: TransformationEnvelope,
 }
@@ -184,16 +204,6 @@ impl SortBy {
     #[must_use]
     pub fn desc(field: impl Into<String>) -> Self {
         Self::new(field, SortDirection::Descending)
-    }
-
-    /// Appends a secondary sort field, used to break ties in prior fields.
-    #[must_use]
-    pub fn then_by(mut self, field: impl Into<String>, direction: SortDirection) -> Self {
-        self.fields.push(SortByField {
-            field: field.into(),
-            descending: direction.is_descending(),
-        });
-        self
     }
 }
 

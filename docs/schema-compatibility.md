@@ -89,8 +89,17 @@ valid JSON, not that Grafana kept what was in it. So for each golden,
    Anything else missing, value-altered (a leaf), or retyped (a container)
    is reported with its JSON path.
 
-Both goldens round-tripped with **zero dropped, altered, or retyped
-properties**:
+   A fourth outcome, `blocked`, covers the case where a checked path cannot
+   be reached because Grafana returned a scalar where the posted document
+   had a non-empty container. The path walk resolves one segment at a time
+   for this reason: jq's `getpath` treats indexing *through* a scalar as a
+   hard error, which would abort the comparison — and, under
+   `set -euo pipefail`, the whole run, silently skipping every golden later
+   in the loop. A `blocked` report names the offending ancestor and the
+   type it came back as.
+
+Both goldens round-tripped with **zero dropped, altered, retyped, or
+blocked properties**:
 
 - [`basic.json`](../crates/panelist/tests/golden/basic.json) (uid
   `golden-service`, 97 leaf properties and 6 empty containers checked) —

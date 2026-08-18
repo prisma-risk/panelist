@@ -29,13 +29,13 @@ fn main() -> panelist::Result<()> {
             PrometheusQuery::new(
                 "histogram_quantile(0.50, sum by (le) (rate(request_duration_seconds_bucket[$__rate_interval])))",
             )
-            .legend("p50"),
+            .legend_format("p50"),
         )
         .query(
             PrometheusQuery::new(
                 "histogram_quantile(0.99, sum by (le) (rate(request_duration_seconds_bucket[$__rate_interval])))",
             )
-            .legend("p99"),
+            .legend_format("p99"),
         )
         .unit(Unit::Seconds)
         .thresholds(

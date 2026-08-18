@@ -339,8 +339,8 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.query($query);
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
-    ($panel:ident; legend: $legend:expr; $($rest:tt)*) => {
-        $panel = $panel.legend($legend);
+    ($panel:ident; legend_format: $legend_format:expr; $($rest:tt)*) => {
+        $panel = $panel.legend_format($legend_format);
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
     ($panel:ident; description: $description:expr; $($rest:tt)*) => {
@@ -461,6 +461,27 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.sort_by($field, $crate::__panelist_sort_direction!($direction));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    // The three block forms come first: `cell: $cell:ident;` would match the
+    // renderer name but then find `{` where it wants `;`, so it falls
+    // through to whichever arm follows. Keep the bare-ident arm last.
+    ($panel:ident; cell: gauge { $($body:tt)* }; $($rest:tt)*) => {
+        let mut __panelist_cell = $crate::GaugeCell::new();
+        $crate::__panelist_gauge_cell_items!(__panelist_cell; $($body)*);
+        $panel = $panel.cell(__panelist_cell);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; cell: sparkline { $($body:tt)* }; $($rest:tt)*) => {
+        let mut __panelist_cell = $crate::SparklineCell::new();
+        $crate::__panelist_sparkline_items!(__panelist_cell; $($body)*);
+        $panel = $panel.cell(__panelist_cell);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; cell: colored_background { $($body:tt)* }; $($rest:tt)*) => {
+        let mut __panelist_cell = $crate::ColoredBackgroundCell::new();
+        $crate::__panelist_background_items!(__panelist_cell; $($body)*);
+        $panel = $panel.cell(__panelist_cell);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; cell: $cell:ident; $($rest:tt)*) => {
         $panel = $panel.cell($crate::__panelist_cell_type!($cell));
         $crate::__panelist_panel_items!($panel; $($rest)*);
@@ -556,8 +577,8 @@ macro_rules! __panelist_axis_placement {
 #[macro_export]
 macro_rules! __panelist_query_items {
     ($query:ident;) => {};
-    ($query:ident; legend: $legend:expr; $($rest:tt)*) => {
-        $query = $query.legend($legend);
+    ($query:ident; legend_format: $legend_format:expr; $($rest:tt)*) => {
+        $query = $query.legend_format($legend_format);
         $crate::__panelist_query_items!($query; $($rest)*);
     };
     ($query:ident; ref_id: $ref_id:expr; $($rest:tt)*) => {
@@ -686,6 +707,36 @@ macro_rules! __panelist_sparkline_items {
 
 #[doc(hidden)]
 #[macro_export]
+macro_rules! __panelist_gauge_cell_items {
+    ($cell:ident;) => {};
+    ($cell:ident; mode: basic; $($rest:tt)*) => {
+        $cell = $cell.mode($crate::BarGaugeDisplayMode::Basic);
+        $crate::__panelist_gauge_cell_items!($cell; $($rest)*);
+    };
+    ($cell:ident; mode: gradient; $($rest:tt)*) => {
+        $cell = $cell.mode($crate::BarGaugeDisplayMode::Gradient);
+        $crate::__panelist_gauge_cell_items!($cell; $($rest)*);
+    };
+    ($cell:ident; mode: lcd; $($rest:tt)*) => {
+        $cell = $cell.mode($crate::BarGaugeDisplayMode::Lcd);
+        $crate::__panelist_gauge_cell_items!($cell; $($rest)*);
+    };
+    ($cell:ident; value_display: text; $($rest:tt)*) => {
+        $cell = $cell.value_display($crate::CellValueDisplay::Text);
+        $crate::__panelist_gauge_cell_items!($cell; $($rest)*);
+    };
+    ($cell:ident; value_display: color; $($rest:tt)*) => {
+        $cell = $cell.value_display($crate::CellValueDisplay::Color);
+        $crate::__panelist_gauge_cell_items!($cell; $($rest)*);
+    };
+    ($cell:ident; value_display: hidden; $($rest:tt)*) => {
+        $cell = $cell.value_display($crate::CellValueDisplay::Hidden);
+        $crate::__panelist_gauge_cell_items!($cell; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __panelist_background_items {
     ($cell:ident;) => {};
     ($cell:ident; mode: basic; $($rest:tt)*) => {
@@ -731,6 +782,12 @@ macro_rules! __panelist_override_items {
     ($field:ident; cell: colored_background { $($body:tt)* }; $($rest:tt)*) => {
         let mut __panelist_cell = $crate::ColoredBackgroundCell::new();
         $crate::__panelist_background_items!(__panelist_cell; $($body)*);
+        $field = $field.cell(__panelist_cell);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; cell: gauge { $($body:tt)* }; $($rest:tt)*) => {
+        let mut __panelist_cell = $crate::GaugeCell::new();
+        $crate::__panelist_gauge_cell_items!(__panelist_cell; $($body)*);
         $field = $field.cell(__panelist_cell);
         $crate::__panelist_override_items!($field; $($rest)*);
     };

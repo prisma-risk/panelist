@@ -49,7 +49,7 @@ impl QueryEditorMode {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct QueryOptions {
     pub(crate) ref_id: Option<String>,
-    pub(crate) legend: Option<String>,
+    pub(crate) legend_format: Option<String>,
     pub(crate) instant: bool,
     pub(crate) range: Option<bool>,
     pub(crate) datasource: Option<DataSource>,
@@ -69,9 +69,14 @@ macro_rules! impl_query_builder {
             }
 
             /// Sets the legend format emitted by the datasource.
+            ///
+            /// This is the per-series name template Grafana sends to the
+            /// datasource as `legendFormat`, for example `"{{status}}"`. It
+            /// is unrelated to [`crate::Legend`], which configures how the
+            /// visualization *draws* its legend.
             #[must_use]
-            pub fn legend(mut self, legend: impl Into<String>) -> Self {
-                self.options.legend = Some(legend.into());
+            pub fn legend_format(mut self, legend_format: impl Into<String>) -> Self {
+                self.options.legend_format = Some(legend_format.into());
                 self
             }
 

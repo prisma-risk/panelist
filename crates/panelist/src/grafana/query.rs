@@ -78,7 +78,7 @@ pub(crate) fn normalize_targets(
                     PrometheusFormat::Heatmap => "heatmap",
                 }),
                 editor_mode: options.editor_mode.map(crate::QueryEditorMode::as_grafana),
-                legend_format: options.legend.clone(),
+                legend_format: options.legend_format.clone(),
                 instant: options.instant,
                 range: options.range,
                 hide: options.hidden,

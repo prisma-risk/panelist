@@ -29,7 +29,57 @@
 
 use serde_json::{Value, json};
 
-use crate::{JoinMode, LabelsToFieldsMode, Transformation, transformation::TransformationFilter};
+use crate::{
+    JoinMode, LabelsToFieldsMode, OrganizeFields, Transformation,
+    transformation::TransformationFilter,
+};
+
+/// Every rename in `organize` whose *new* name is `target`, yielded as the
+/// original pre-rename field names.
+///
+/// Grafana's rename step keys on the field's pre-rename display name and
+/// writes the new one
+/// (`packages/grafana-data/src/transformations/transformers/rename.ts`
+/// L49-52), so a rename entry reads `source -> target`.
+pub(crate) fn rename_sources<'a>(
+    organize: &'a OrganizeFields,
+    target: &str,
+) -> impl Iterator<Item = &'a str> {
+    let target = target.to_owned();
+    organize
+        .renames
+        .iter()
+        .filter(move |(_, to)| **to == target)
+        .map(|(from, _)| from.as_str())
+}
+
+/// Translates one authored `order` entry — a FINAL, post-rename display
+/// name — into the `indexByName` key Grafana will actually match.
+///
+/// Grafana's `organize` transformer pipes filter, then order, then rename
+/// (`packages/grafana-data/src/transformations/transformers/organize.ts`
+/// L35-46). `indexByName` is consumed by the *order* step, which compares
+/// each field's display name as it stands at that moment (`order.ts` L73-80,
+/// `createFieldsOrdererManual`), and renaming has not happened yet. So an
+/// `indexByName` keyed on the names an author sees in the finished table
+/// resolves only for columns that were never renamed; every renamed column
+/// silently falls through to `Number.MAX_SAFE_INTEGER` (`order.ts` L82-87)
+/// and the ordering block becomes a no-op.
+///
+/// `excludeByName` is deliberately NOT translated the same way: the filter
+/// step runs first, so its keys are legitimately pre-rename names.
+///
+/// A name that no rename targets is already the name the order step sees and
+/// passes through unchanged. A name that two or more renames target is
+/// ambiguous; validation rejects that before lowering ever runs, and this
+/// falls back to the untranslated name so the lowering stays total.
+fn index_by_name_key<'a>(organize: &'a OrganizeFields, ordered: &'a str) -> &'a str {
+    let mut sources = rename_sources(organize, ordered);
+    match (sources.next(), sources.next()) {
+        (Some(source), None) => source,
+        _ => ordered,
+    }
+}
 
 pub(crate) fn normalize_transformation(transformation: &Transformation) -> Value {
     let (id, options) = match transformation {
@@ -54,7 +104,9 @@ pub(crate) fn normalize_transformation(transformation: &Transformation) -> Value
                     .order
                     .iter()
                     .enumerate()
-                    .map(|(index, name)| (name.clone(), json!(index)))
+                    .map(|(index, name)| {
+                        (index_by_name_key(organize, name).to_owned(), json!(index))
+                    })
                     .collect::<serde_json::Map<_, _>>()
                     .into(),
             );

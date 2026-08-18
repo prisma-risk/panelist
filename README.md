@@ -64,6 +64,13 @@ per [semver](https://semver.org/) and the project's
   `PanelBuilder<TableKind>::cell` instead, which now stores it as typed table
   options so it survives a later `.field_config()` call the way `.sort_by()`
   already did.
+- The query legend-format setter was renamed from `legend` to
+  `legend_format`, on `PrometheusQuery`, `LokiQuery`, `RawQuery`, and
+  `PanelBuilder`, and the DSL key `legend:` became `legend_format:` in both
+  the panel body and a query body. Call `legend_format` instead. It sets the
+  datasource's `legendFormat` series-name template and had nothing to do with
+  the visualization legend, which keeps its own names: `legend_options` on the
+  builder and `legend { … }` in the DSL.
 - `TableSort` and `TransformationFilter` narrowed from `pub` to `pub(crate)`
   and were removed from the prelude. Neither type was ever constructible or
   acceptable as a parameter from outside the crate, so no external caller
@@ -95,7 +102,7 @@ let dashboard = dashboard! {
     row "Latency" {
         timeseries "Request latency" {
             query: promql!("histogram_quantile(0.99, rate(request_duration_seconds_bucket[$__rate_interval]))") {
-                legend: "p99";
+                legend_format: "p99";
             }
             unit: seconds;
             width: 12;
@@ -204,7 +211,7 @@ use panelist::prelude::*;
 let panel = Timeseries::new("Requests")
     .query(
         PrometheusQuery::new("rate(http_requests_total[$__rate_interval])")
-            .legend("{{status}}"),
+            .legend_format("{{status}}"),
     )
     .unit(Unit::RequestsPerSecond)
     .width(12);

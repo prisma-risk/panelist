@@ -181,4 +181,45 @@ pub enum ValidationError {
         /// Panel title.
         panel: String,
     },
+    /// An `organize` transformation orders a field name that more than one
+    /// rename produces, so the field it refers to is ambiguous.
+    ///
+    /// `OrganizeFields::order` takes the final, post-rename names. Panelist
+    /// translates each back to the pre-rename name Grafana's ordering step
+    /// matches on, which is impossible when two renames share a target.
+    #[error(
+        "panel \"{panel}\": organize transformation orders \"{field}\", but {} are all renamed to it; the ordering key is ambiguous",
+        format_quoted(.sources)
+    )]
+    AmbiguousOrganizeOrder {
+        /// Panel title.
+        panel: String,
+        /// The ordered field name that cannot be resolved.
+        field: String,
+        /// Every original field name renamed to `field`.
+        sources: Vec<String>,
+    },
+    /// Two entries in an `organize` transformation's ordering resolve to the
+    /// same underlying field.
+    #[error(
+        "panel \"{panel}\": organize transformation ordering resolves \"{first}\" and \"{second}\" to the same field \"{field}\"; one field cannot hold two positions"
+    )]
+    ConflictingOrganizeOrder {
+        /// Panel title.
+        panel: String,
+        /// The ordered name that claimed the position first.
+        first: String,
+        /// The ordered name that collided with it.
+        second: String,
+        /// The underlying field both resolve to.
+        field: String,
+    },
+}
+
+fn format_quoted(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| format!("\"{value}\""))
+        .collect::<Vec<_>>()
+        .join(" and ")
 }

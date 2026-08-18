@@ -337,13 +337,17 @@ impl<K: PanelType> PanelBuilder<K> {
 
     /// Sets the legend format on the most recently added query.
     ///
+    /// This is the datasource's `legendFormat` series-name template, not the
+    /// visualization's legend — for that see
+    /// [`PanelBuilder::<TimeseriesKind>::legend_options`].
+    ///
     /// This convenience makes the macro DSL read naturally. Builder-oriented
     /// code can set the same value directly on [`crate::PrometheusQuery`] or
     /// [`crate::LokiQuery`]. Calling it before adding a query is a no-op.
     #[must_use]
-    pub fn legend(mut self, legend: impl Into<String>) -> Self {
+    pub fn legend_format(mut self, legend_format: impl Into<String>) -> Self {
         if let Some(query) = self.panel.queries.last_mut() {
-            query.options_mut().legend = Some(legend.into());
+            query.options_mut().legend_format = Some(legend_format.into());
         }
         self
     }
@@ -731,8 +735,11 @@ impl PanelBuilder<HeatmapKind> {
 
     /// Shows or hides the color-scale legend.
     ///
-    /// Named `show_legend` rather than `legend` because `PanelBuilder`
-    /// already exposes `legend` for a query's legend format.
+    /// Named `show_legend` rather than `legend` because it takes a bare
+    /// boolean: the crate's other legend setter,
+    /// [`PanelBuilder::<TimeseriesKind>::legend_options`], takes a
+    /// [`Legend`], so a `legend` here would read as "configure the legend"
+    /// and mislead.
     #[must_use]
     pub fn show_legend(mut self, show: bool) -> Self {
         self.panel.kind_options.heatmap().legend = Some(show);

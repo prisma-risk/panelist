@@ -70,13 +70,13 @@ fn main() -> panelist::Result<()> {
         row "Traffic" {
             timeseries "Request rate by status" {
                 query: promql!("sum(rate(http_requests_total{status=~\"2..\"}[$__rate_interval]))") {
-                    legend: "2xx";
+                    legend_format: "2xx";
                 }
                 query: promql!("sum(rate(http_requests_total{status=~\"4..\"}[$__rate_interval]))") {
-                    legend: "4xx";
+                    legend_format: "4xx";
                 }
                 query: promql!("sum(rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))") {
-                    legend: "5xx";
+                    legend_format: "5xx";
                 }
                 unit: reqps;
                 width: 12;
@@ -85,7 +85,7 @@ fn main() -> panelist::Result<()> {
 
             bar_gauge "Top routes by traffic" {
                 query: promql!("topk(10, sum by (route) (rate(http_requests_total[$__rate_interval])))") {
-                    legend: "{{route}}";
+                    legend_format: "{{route}}";
                     instant: true;
                 }
                 unit: reqps;
@@ -219,7 +219,7 @@ fn main() -> panelist::Result<()> {
         row "Latency" {
             timeseries "p95 by route" {
                 query: promql!("topk(5, histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval]))))") {
-                    legend: "{{route}}";
+                    legend_format: "{{route}}";
                 }
                 unit: seconds;
                 width: 12;

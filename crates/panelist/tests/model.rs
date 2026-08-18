@@ -125,7 +125,7 @@ fn collapsed_rows_nest_panels_and_only_consume_the_row_height() {
 #[test]
 fn serializes_units_thresholds_legends_and_overrides() {
     let panel = Timeseries::new("Latency")
-        .query(PrometheusQuery::new("latency").legend("p99"))
+        .query(PrometheusQuery::new("latency").legend_format("p99"))
         .unit(Unit::Milliseconds)
         .thresholds(Thresholds::new().green(0.0).yellow(250.0).red(500.0))
         .legend_options(
@@ -171,9 +171,14 @@ fn matchers_cover_queries_names_and_field_classes() {
         overrides[0]["matcher"],
         json!({"id": "byFrameRefID", "options": "B"})
     );
+    // `byNames` takes an object, not a bare array: Grafana's
+    // `nameMatcher.ts` destructures `const { names, mode = include } =
+    // options`, so an array yields `names === undefined` and the override
+    // matches nothing. Grafana stores and returns either shape unchanged,
+    // so only the source says which is right.
     assert_eq!(
         overrides[1]["matcher"],
-        json!({"id": "byNames", "options": ["p50", "p95"]})
+        json!({"id": "byNames", "options": {"names": ["p50", "p95"]}})
     );
     assert_eq!(overrides[2]["matcher"], json!({"id": "numeric"}));
     assert_eq!(overrides[3]["matcher"], json!({"id": "time"}));
@@ -618,13 +623,18 @@ fn transformations_serialize_in_authored_order() {
         transformations[0],
         json!({"id": "joinByField", "options": {"byField": "route", "mode": "outer"}})
     );
+    // `order` is authored in final names (`RPS`), but Grafana's organize
+    // transformer orders before it renames, so `indexByName` has to be keyed
+    // on the pre-rename name (`Value #A`). `route` is never renamed and
+    // passes through; `excludeByName` is correct as authored because the
+    // filter step runs first of all.
     assert_eq!(
         transformations[1],
         json!({
             "id": "organize",
             "options": {
                 "excludeByName": {"Time": true},
-                "indexByName": {"RPS": 1, "route": 0},
+                "indexByName": {"Value #A": 1, "route": 0},
                 "renameByName": {"Value #A": "RPS"},
             }
         })
@@ -633,6 +643,89 @@ fn transformations_serialize_in_authored_order() {
         transformations[2],
         json!({"id": "sortBy", "options": {"sort": [{"field": "RPS", "desc": true}]}})
     );
+}
+
+#[test]
+fn organize_ordering_of_an_unrenamed_field_passes_through_untranslated() {
+    let dashboard = Dashboard::new("Order passthrough").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(OrganizeFields::new().order(["route", "status"])),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(
+        transformations[0]["options"]["indexByName"],
+        json!({"route": 0, "status": 1})
+    );
+}
+
+#[test]
+fn organize_ordering_a_name_two_renames_produce_is_rejected() {
+    let dashboard = Dashboard::new("Ambiguous order").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(
+                OrganizeFields::new()
+                    .rename("Value #A", "Latency")
+                    .rename("Value #B", "Latency")
+                    .order(["Latency"]),
+            ),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::AmbiguousOrganizeOrder { field, sources, .. }]
+            if field == "Latency" && sources == &["Value #A".to_owned(), "Value #B".to_owned()]
+    ));
+    let message = errors.errors()[0].to_string();
+    assert!(
+        message.contains("\"Value #A\" and \"Value #B\""),
+        "{message}"
+    );
+}
+
+#[test]
+fn organize_ordering_two_names_onto_one_field_is_rejected() {
+    // `Latency` resolves back to `Value #A`, and `Value #A` — nobody's
+    // rename target — resolves to itself. Both ordering entries would land
+    // on the same `indexByName` key and one would silently overwrite the
+    // other.
+    let dashboard = Dashboard::new("Conflicting order").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(
+                OrganizeFields::new()
+                    .rename("Value #A", "Latency")
+                    .order(["Latency", "Value #A"]),
+            ),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::ConflictingOrganizeOrder { first, second, field, .. }]
+            if first == "Latency" && second == "Value #A" && field == "Value #A"
+    ));
+}
+
+#[test]
+fn organize_ordering_without_ambiguity_passes_validation() {
+    Dashboard::new("Fine")
+        .panel(
+            Table::new("Routes")
+                .query(PrometheusQuery::new("up"))
+                .transform(
+                    OrganizeFields::new()
+                        .rename("Value #A", "RPS")
+                        .rename("Value #B", "Errors")
+                        .hide("Time")
+                        .order(["route", "RPS", "Errors"]),
+                ),
+        )
+        .validate()
+        .unwrap();
 }
 
 #[test]
@@ -705,6 +798,47 @@ fn unknown_transformation_ref_ids_are_rejected() {
         errors.errors(),
         [ValidationError::UnknownTransformationRefId { ref_id, .. }] if ref_id == "Z"
     ));
+}
+
+/// One authoring mistake, one error. A transformation that both filters on
+/// a reference ID and names the same one in its own options used to report
+/// the same unknown reference twice.
+#[test]
+fn one_unknown_ref_id_reported_once_even_when_named_twice() {
+    let dashboard = Dashboard::new("Doubled").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(TimeSeriesToTable::new().query("Z").only_ref_id("Z")),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert_eq!(
+        errors.errors().len(),
+        1,
+        "{:?}",
+        errors
+            .errors()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+    );
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::UnknownTransformationRefId { ref_id, .. }] if ref_id == "Z"
+    ));
+}
+
+/// Two genuinely different unknown references are still two errors.
+#[test]
+fn two_unknown_ref_ids_are_reported_separately() {
+    let dashboard = Dashboard::new("Two bad refs").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(TimeSeriesToTable::new().query("Y").only_ref_id("Z")),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert_eq!(errors.errors().len(), 2);
 }
 
 #[test]

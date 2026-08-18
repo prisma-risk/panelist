@@ -40,7 +40,7 @@ fn macro_and_builder_produce_the_same_authoring_model() {
         row "Traffic" {
             timeseries "Requests" {
                 query: promql!("rate(requests_total[5m])") {
-                    legend: "{{status}}";
+                    legend_format: "{{status}}";
                 }
                 unit: reqps;
                 width: 12;
@@ -58,7 +58,10 @@ fn macro_and_builder_produce_the_same_authoring_model() {
         .row(
             Row::new("Traffic").panel(
                 Timeseries::new("Requests")
-                    .query(PrometheusQuery::new("rate(requests_total[5m])").legend("{{status}}"))
+                    .query(
+                        PrometheusQuery::new("rate(requests_total[5m])")
+                            .legend_format("{{status}}"),
+                    )
                     .unit(Unit::RequestsPerSecond)
                     .width(12),
             ),
@@ -562,6 +565,129 @@ fn unit_percent_unit_dsl_matches_the_builder_model() {
         Stat::new("Error ratio")
             .query(PrometheusQuery::new("a"))
             .unit(Unit::PercentUnit),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// `GaugeCell::mode` and `GaugeCell::value_display` were reachable from the
+/// builders but from neither DSL `cell:` position, and the panel-level
+/// `cell:` accepted only a bare renderer name, so no table default cell
+/// could carry options at all. This covers every arm of both new block
+/// forms; the builder side sets each option explicitly so a dropped macro
+/// arm shows up as `None` vs `Some(..)` rather than agreeing by default.
+#[test]
+fn cell_option_blocks_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Gauge cells";
+
+        table "Load" {
+            query: promql!("up");
+
+            cell: gauge { mode: lcd; value_display: hidden; };
+
+            override field("Basic") {
+                cell: gauge { mode: basic; value_display: text; };
+            }
+
+            override field("Gradient") {
+                cell: gauge { mode: gradient; value_display: color; };
+            }
+        }
+
+        table "Panel sparkline default" {
+            query: promql!("up");
+            cell: sparkline { hide_value: true; line_width: 2.0; fill_opacity: 20.0; };
+        }
+
+        table "Panel background default" {
+            query: promql!("up");
+            cell: colored_background { mode: gradient; apply_to_row: true; wrap_text: true; };
+        }
+    };
+
+    let from_builder = Dashboard::new("Gauge cells")
+        .panel(
+            Table::new("Load")
+                .query(PrometheusQuery::new("up"))
+                .cell(
+                    GaugeCell::new()
+                        .mode(BarGaugeDisplayMode::Lcd)
+                        .value_display(CellValueDisplay::Hidden),
+                )
+                .override_field(
+                    FieldOverride::by_name("Basic").cell(
+                        GaugeCell::new()
+                            .mode(BarGaugeDisplayMode::Basic)
+                            .value_display(CellValueDisplay::Text),
+                    ),
+                )
+                .override_field(
+                    FieldOverride::by_name("Gradient").cell(
+                        GaugeCell::new()
+                            .mode(BarGaugeDisplayMode::Gradient)
+                            .value_display(CellValueDisplay::Color),
+                    ),
+                ),
+        )
+        .panel(
+            Table::new("Panel sparkline default")
+                .query(PrometheusQuery::new("up"))
+                .cell(
+                    SparklineCell::new()
+                        .hide_value(true)
+                        .line_width(2.0)
+                        .fill_opacity(20.0),
+                ),
+        )
+        .panel(
+            Table::new("Panel background default")
+                .query(PrometheusQuery::new("up"))
+                .cell(
+                    ColoredBackgroundCell::new()
+                        .mode(CellBackgroundMode::Gradient)
+                        .apply_to_row(true)
+                        .wrap_text(true),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// The transformation envelope — `only_frame_name`, `only_frame_index`, and
+/// `disabled` — has no dedicated `transform …` keyword form. It is reachable
+/// from the DSL through the typed-expression rule `transform: <expr>;`,
+/// which takes any `impl Into<Transformation>`. That is a first-class typed
+/// rule, not a raw-JSON escape hatch, so the two surfaces stay at parity;
+/// this pins that they actually agree.
+#[test]
+fn transformation_envelope_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Envelopes";
+
+        table "Filtered" {
+            query: promql!("sum(a)") { ref_id: "A"; }
+
+            transform: SortBy::desc("p95").only_frame_name("latency");
+            transform: JoinByField::new("route").only_frame_index(1);
+            transform: LabelsToFields::new().disabled(true);
+        }
+    };
+
+    let from_builder = Dashboard::new("Envelopes").panel(
+        Table::new("Filtered")
+            .query(PrometheusQuery::new("sum(a)").ref_id("A"))
+            .transform(SortBy::desc("p95").only_frame_name("latency"))
+            .transform(JoinByField::new("route").only_frame_index(1))
+            .transform(LabelsToFields::new().disabled(true)),
     );
 
     assert_eq!(from_macro, from_builder);

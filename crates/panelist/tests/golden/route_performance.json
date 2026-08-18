@@ -506,14 +506,14 @@
               "Time": true
             },
             "indexByName": {
-              "4xx rate": 2,
-              "5xx rate": 3,
-              "RPS": 1,
-              "Trend": 8,
-              "error %": 4,
-              "p50": 5,
-              "p95": 6,
-              "p99": 7,
+              "Trend #H": 8,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #F": 6,
+              "Value #G": 7,
               "route": 0
             },
             "renameByName": {

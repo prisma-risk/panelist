@@ -21,14 +21,15 @@
 //  limitations under the License.
 //
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::{
-    Dashboard, DashboardItem, OverrideMatcher, Panel, Thresholds, Transformation, ValidationError,
-    ValidationErrors, Variable, transformation::TransformationFilter,
+    Dashboard, DashboardItem, OrganizeFields, OverrideMatcher, Panel, Thresholds, Transformation,
+    ValidationError, ValidationErrors, Variable, transformation::TransformationFilter,
 };
 
 use super::query::effective_ref_ids;
+use super::transform::rename_sources;
 
 pub(crate) fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
     let mut errors = Vec::new();
@@ -190,18 +191,65 @@ fn validate_transformation(
         Transformation::TimeSeriesToTable(convert) => {
             referenced.extend(convert.queries.keys().map(String::as_str));
         }
+        Transformation::OrganizeFields(organize) => {
+            validate_organize_order(panel, organize, errors);
+        }
         Transformation::JoinByField(_)
         | Transformation::SortBy(_)
-        | Transformation::OrganizeFields(_)
         | Transformation::LabelsToFields(_)
         | Transformation::Raw(_) => {}
     }
+
+    // One authoring mistake, one error. A transformation that both filters
+    // on a reference ID and names the same one in its options — e.g.
+    // `TimeSeriesToTable::new().query("Z").only_ref_id("Z")` — used to push
+    // two identical errors for it.
+    let mut seen = HashSet::new();
+    referenced.retain(|ref_id| seen.insert(*ref_id));
 
     for ref_id in referenced {
         if !ref_ids.contains(ref_id) {
             errors.push(ValidationError::UnknownTransformationRefId {
                 panel: panel.title.clone(),
                 ref_id: ref_id.to_owned(),
+            });
+        }
+    }
+}
+
+/// Rejects the two ways `OrganizeFields::order` can fail to lower.
+///
+/// `order` lists the FINAL, post-rename names an author sees, and
+/// `super::transform::index_by_name_key` translates each back to the
+/// pre-rename name Grafana's ordering step actually matches. Both failures
+/// below would otherwise mis-order columns in silence: Grafana accepts,
+/// stores, and returns an unresolvable `indexByName` unchanged, then ignores
+/// it at render time.
+fn validate_organize_order(
+    panel: &Panel,
+    organize: &OrganizeFields,
+    errors: &mut Vec<ValidationError>,
+) {
+    let mut claimed: BTreeMap<&str, &str> = BTreeMap::new();
+
+    for ordered in &organize.order {
+        let sources: Vec<&str> = rename_sources(organize, ordered).collect();
+        if sources.len() > 1 {
+            errors.push(ValidationError::AmbiguousOrganizeOrder {
+                panel: panel.title.clone(),
+                field: ordered.clone(),
+                sources: sources.into_iter().map(ToOwned::to_owned).collect(),
+            });
+            continue;
+        }
+
+        let key = sources.first().copied().unwrap_or(ordered.as_str());
+        if let Some(first) = claimed.insert(key, ordered.as_str()) {
+            errors.push(ValidationError::ConflictingOrganizeOrder {
+                panel: panel.title.clone(),
+                first: first.to_owned(),
+                second: ordered.clone(),
+                field: key.to_owned(),
             });
         }
     }
