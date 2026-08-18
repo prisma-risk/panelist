@@ -44,13 +44,13 @@ fn main() -> panelist::Result<()> {
 
             stat "Error rate" {
                 query: promql!("sum(rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum(rate(http_requests_total[$__rate_interval]))");
-                unit: percent;
+                unit: percent_unit;
                 width: 6;
 
                 thresholds {
                     green: 0.0;
-                    yellow: 1.0;
-                    red: 5.0;
+                    yellow: 0.01;
+                    red: 0.05;
                 }
             }
 
@@ -80,6 +80,7 @@ fn main() -> panelist::Result<()> {
                 }
                 unit: reqps;
                 width: 12;
+                stacking: normal;
             }
 
             bar_gauge "Top routes by traffic" {
@@ -109,20 +110,47 @@ fn main() -> panelist::Result<()> {
                     format: table;
                     instant: true;
                 }
-                query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                query: promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum by (route) (rate(http_requests_total[$__rate_interval]))") {
                     ref_id: "D";
                     format: table;
                     instant: true;
                 }
+                query: promql!("histogram_quantile(0.50, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                    ref_id: "E";
+                    format: table;
+                    instant: true;
+                }
+                query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                    ref_id: "F";
+                    format: table;
+                    instant: true;
+                }
+                query: promql!("histogram_quantile(0.99, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                    ref_id: "G";
+                    format: table;
+                    instant: true;
+                }
+                query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                    ref_id: "H";
+                    format: time_series;
+                }
                 width: 24;
 
+                transform time_series_to_table {
+                    query "H": last;
+                }
                 transform join_by_field("route", outer_tabular);
                 transform organize {
                     rename "Value #A" => "RPS";
                     rename "Value #B" => "4xx rate";
                     rename "Value #C" => "5xx rate";
-                    rename "Value #D" => "p95";
+                    rename "Value #D" => "error %";
+                    rename "Value #E" => "p50";
+                    rename "Value #F" => "p95";
+                    rename "Value #G" => "p99";
+                    rename "Value #H" => "Trend";
                     hide "Time";
+                    order ["route", "RPS", "4xx rate", "5xx rate", "error %", "p50", "p95", "p99", "Trend"];
                 }
                 sort_by: ("p95", desc);
 
@@ -130,14 +158,26 @@ fn main() -> panelist::Result<()> {
                     unit: reqps;
                 }
 
+                override field("4xx rate") {
+                    unit: reqps;
+                }
+
                 override field("5xx rate") {
-                    unit: percent;
+                    unit: reqps;
+                }
+
+                override field("error %") {
+                    unit: percent_unit;
                     cell: colored_background;
                     thresholds {
                         green: 0.0;
-                        yellow: 1.0;
-                        red: 5.0;
+                        yellow: 0.01;
+                        red: 0.05;
                     }
+                }
+
+                override field("p50") {
+                    unit: seconds;
                 }
 
                 override field("p95") {
@@ -148,6 +188,14 @@ fn main() -> panelist::Result<()> {
                         yellow: 0.3;
                         red: 1.0;
                     }
+                }
+
+                override field("p99") {
+                    unit: seconds;
+                }
+
+                override field("Trend") {
+                    cell: sparkline { hide_value: true; line_width: 2.0; };
                 }
             }
         }

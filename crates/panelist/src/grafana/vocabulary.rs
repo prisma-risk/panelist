@@ -34,6 +34,7 @@ pub(crate) fn unit(unit: &Unit) -> &str {
         Unit::Bytes => "bytes",
         Unit::BytesPerSecond => "Bps",
         Unit::Percent => "percent",
+        Unit::PercentUnit => "percentunit",
         Unit::RequestsPerSecond => "reqps",
         Unit::OperationsPerSecond => "ops",
         Unit::Short => "short",

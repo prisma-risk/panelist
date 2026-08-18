@@ -465,6 +465,10 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.cell($crate::__panelist_cell_type!($cell));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    ($panel:ident; stacking: $mode:ident; $($rest:tt)*) => {
+        $panel = $panel.stacking($crate::Stacking::new($crate::__panelist_stacking_mode!($mode)));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; color_scheme: $scheme:expr; $($rest:tt)*) => {
         $panel = $panel.color_scheme($scheme);
         $crate::__panelist_panel_items!($panel; $($rest)*);
@@ -838,6 +842,9 @@ macro_rules! __panelist_unit {
     (percent) => {
         $crate::Unit::Percent
     };
+    (percent_unit) => {
+        $crate::Unit::PercentUnit
+    };
     (reqps) => {
         $crate::Unit::RequestsPerSecond
     };
@@ -906,6 +913,20 @@ macro_rules! __panelist_reducer {
     };
     (total) => {
         $crate::Reducer::Total
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_stacking_mode {
+    (none) => {
+        $crate::StackingMode::None
+    };
+    (normal) => {
+        $crate::StackingMode::Normal
+    };
+    (percent) => {
+        $crate::StackingMode::Percent
     };
 }
 

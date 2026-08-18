@@ -105,15 +105,15 @@
               },
               {
                 "color": "yellow",
-                "value": 1.0
+                "value": 0.01
               },
               {
                 "color": "red",
-                "value": 5.0
+                "value": 0.05
               }
             ]
           },
-          "unit": "percent"
+          "unit": "percentunit"
         },
         "overrides": []
       },
@@ -290,7 +290,11 @@
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "showPoints": "auto",
-            "spanNulls": false
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
           },
           "unit": "reqps"
         },
@@ -426,14 +430,68 @@
             "type": "prometheus",
             "uid": "prometheus-main"
           },
+          "expr": "sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum by (route) (rate(http_requests_total[$__rate_interval]))",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "hide": false
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-main"
+          },
+          "expr": "histogram_quantile(0.50, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "hide": false
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-main"
+          },
           "expr": "histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))",
           "format": "table",
           "instant": true,
           "range": false,
           "hide": false
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-main"
+          },
+          "expr": "histogram_quantile(0.99, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "hide": false
+        },
+        {
+          "refId": "H",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-main"
+          },
+          "expr": "histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))",
+          "format": "time_series",
+          "hide": false
         }
       ],
       "transformations": [
+        {
+          "id": "timeSeriesTable",
+          "options": {
+            "H": {
+              "stat": "lastNotNull"
+            }
+          }
+        },
         {
           "id": "joinByField",
           "options": {
@@ -447,12 +505,26 @@
             "excludeByName": {
               "Time": true
             },
-            "indexByName": {},
+            "indexByName": {
+              "4xx rate": 2,
+              "5xx rate": 3,
+              "RPS": 1,
+              "Trend": 8,
+              "error %": 4,
+              "p50": 5,
+              "p95": 6,
+              "p99": 7,
+              "route": 0
+            },
             "renameByName": {
               "Value #A": "RPS",
               "Value #B": "4xx rate",
               "Value #C": "5xx rate",
-              "Value #D": "p95"
+              "Value #D": "error %",
+              "Value #E": "p50",
+              "Value #F": "p95",
+              "Value #G": "p99",
+              "Value #H": "Trend"
             }
           }
         }
@@ -480,12 +552,36 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "4xx rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "reqps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "5xx rate"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "percent"
+                "value": "reqps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
               },
               {
                 "id": "custom.cellOptions",
@@ -508,14 +604,26 @@
                     },
                     {
                       "color": "yellow",
-                      "value": 1.0
+                      "value": 0.01
                     },
                     {
                       "color": "red",
-                      "value": 5.0
+                      "value": 0.05
                     }
                   ]
                 }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
               }
             ]
           },
@@ -557,6 +665,34 @@
                       "value": 1.0
                     }
                   ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Trend"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "hideValue": true,
+                  "lineWidth": 2.0,
+                  "type": "sparkline"
                 }
               }
             ]

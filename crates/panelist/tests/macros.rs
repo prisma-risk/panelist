@@ -500,6 +500,78 @@ fn heatmap_dsl_covers_format_color_mode_and_axis_placement_variants() {
 }
 
 #[test]
+fn stacking_dsl_matches_the_builder_model() {
+    // Covers all three `__panelist_stacking_mode!` arms. `none` is
+    // `StackingMode`'s `#[default]` variant, so it is paired here with an
+    // explicit `.stacking(Stacking::new(StackingMode::None))` on the
+    // builder side rather than an omitted call, so a dropped macro arm
+    // would still produce a detectable `None` vs. `Some(..)` mismatch.
+    let from_macro = dashboard! {
+        title: "Stacking";
+
+        timeseries "Normal stacking" {
+            query: promql!("a");
+            stacking: normal;
+        }
+        timeseries "Percent stacking" {
+            query: promql!("b");
+            stacking: percent;
+        }
+        timeseries "No stacking" {
+            query: promql!("c");
+            stacking: none;
+        }
+    };
+
+    let from_builder = Dashboard::new("Stacking")
+        .panel(
+            Timeseries::new("Normal stacking")
+                .query(PrometheusQuery::new("a"))
+                .stacking(Stacking::new(StackingMode::Normal)),
+        )
+        .panel(
+            Timeseries::new("Percent stacking")
+                .query(PrometheusQuery::new("b"))
+                .stacking(Stacking::new(StackingMode::Percent)),
+        )
+        .panel(
+            Timeseries::new("No stacking")
+                .query(PrometheusQuery::new("c"))
+                .stacking(Stacking::new(StackingMode::None)),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
+fn unit_percent_unit_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Percent unit";
+
+        stat "Error ratio" {
+            query: promql!("a");
+            unit: percent_unit;
+        }
+    };
+
+    let from_builder = Dashboard::new("Percent unit").panel(
+        Stat::new("Error ratio")
+            .query(PrometheusQuery::new("a"))
+            .unit(Unit::PercentUnit),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
 fn table_panel_default_cell_and_remaining_cell_variants_dsl_matches_the_builder_model() {
     let from_macro = dashboard! {
         title: "Cell defaults";

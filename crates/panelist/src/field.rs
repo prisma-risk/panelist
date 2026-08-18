@@ -42,8 +42,16 @@ pub enum Unit {
     Bytes,
     /// Bytes per second using IEC scaling (`Bps`).
     BytesPerSecond,
-    /// Percentage in the 0–100 range (`percent`).
+    /// Percentage in the 0–100 range (`percent`). A query yielding a raw
+    /// fraction (0.0–1.0) needs [`Unit::PercentUnit`] instead, or must be
+    /// multiplied by 100 to match this scale.
     Percent,
+    /// Percentage expressed as a 0–1 fraction (`percentunit`), the scale
+    /// Prometheus ratio queries such as `a / b` naturally produce. Contrast
+    /// with [`Unit::Percent`]'s 0–100 range — thresholds authored against
+    /// one scale will not fire correctly if the field actually uses the
+    /// other.
+    PercentUnit,
     /// Requests per second (`reqps`).
     RequestsPerSecond,
     /// Operations per second (`ops`).

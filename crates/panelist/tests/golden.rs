@@ -102,13 +102,13 @@ fn route_performance_dashboard() -> Dashboard {
 
             stat "Error rate" {
                 query: promql!("sum(rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum(rate(http_requests_total[$__rate_interval]))");
-                unit: percent;
+                unit: percent_unit;
                 width: 6;
 
                 thresholds {
                     green: 0.0;
-                    yellow: 1.0;
-                    red: 5.0;
+                    yellow: 0.01;
+                    red: 0.05;
                 }
             }
 
@@ -138,6 +138,7 @@ fn route_performance_dashboard() -> Dashboard {
                 }
                 unit: reqps;
                 width: 12;
+                stacking: normal;
             }
 
             bar_gauge "Top routes by traffic" {
@@ -167,20 +168,47 @@ fn route_performance_dashboard() -> Dashboard {
                     format: table;
                     instant: true;
                 }
-                query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                query: promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum by (route) (rate(http_requests_total[$__rate_interval]))") {
                     ref_id: "D";
                     format: table;
                     instant: true;
                 }
+                query: promql!("histogram_quantile(0.50, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                    ref_id: "E";
+                    format: table;
+                    instant: true;
+                }
+                query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                    ref_id: "F";
+                    format: table;
+                    instant: true;
+                }
+                query: promql!("histogram_quantile(0.99, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                    ref_id: "G";
+                    format: table;
+                    instant: true;
+                }
+                query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                    ref_id: "H";
+                    format: time_series;
+                }
                 width: 24;
 
+                transform time_series_to_table {
+                    query "H": last;
+                }
                 transform join_by_field("route", outer_tabular);
                 transform organize {
                     rename "Value #A" => "RPS";
                     rename "Value #B" => "4xx rate";
                     rename "Value #C" => "5xx rate";
-                    rename "Value #D" => "p95";
+                    rename "Value #D" => "error %";
+                    rename "Value #E" => "p50";
+                    rename "Value #F" => "p95";
+                    rename "Value #G" => "p99";
+                    rename "Value #H" => "Trend";
                     hide "Time";
+                    order ["route", "RPS", "4xx rate", "5xx rate", "error %", "p50", "p95", "p99", "Trend"];
                 }
                 sort_by: ("p95", desc);
 
@@ -188,14 +216,26 @@ fn route_performance_dashboard() -> Dashboard {
                     unit: reqps;
                 }
 
+                override field("4xx rate") {
+                    unit: reqps;
+                }
+
                 override field("5xx rate") {
-                    unit: percent;
+                    unit: reqps;
+                }
+
+                override field("error %") {
+                    unit: percent_unit;
                     cell: colored_background;
                     thresholds {
                         green: 0.0;
-                        yellow: 1.0;
-                        red: 5.0;
+                        yellow: 0.01;
+                        red: 0.05;
                     }
+                }
+
+                override field("p50") {
+                    unit: seconds;
                 }
 
                 override field("p95") {
@@ -206,6 +246,14 @@ fn route_performance_dashboard() -> Dashboard {
                         yellow: 0.3;
                         red: 1.0;
                     }
+                }
+
+                override field("p99") {
+                    unit: seconds;
+                }
+
+                override field("Trend") {
+                    cell: sparkline { hide_value: true; line_width: 2.0; };
                 }
             }
         }
@@ -276,15 +324,30 @@ fn route_performance_matches_the_committed_golden_file() {
     assert_eq!(actual, expected);
 }
 
-#[test]
-fn route_performance_uses_no_raw_escape_hatches() {
-    let source = include_str!("golden.rs");
-    let dashboard = source
-        .split("fn route_performance_dashboard")
-        .nth(1)
-        .expect("acceptance dashboard should be defined");
-    let body = &dashboard[..dashboard.find("\n}\n").expect("function should close")];
+/// Collapses runs of whitespace (spaces, tabs, newlines) into a single
+/// space so the escape-hatch grep below can't be defeated by reformatting
+/// tricks like `option  "custom_flag" : true;` — rustfmt does not reformat
+/// the inside of macro invocations it doesn't recognize, so extra
+/// whitespace there survives `cargo fmt --check` untouched.
+fn normalize_whitespace(source: &str) -> String {
+    let mut normalized = String::with_capacity(source.len());
+    let mut in_whitespace = false;
+    for ch in source.chars() {
+        if ch.is_whitespace() {
+            if !in_whitespace {
+                normalized.push(' ');
+            }
+            in_whitespace = true;
+        } else {
+            normalized.push(ch);
+            in_whitespace = false;
+        }
+    }
+    normalized
+}
 
+fn assert_no_raw_escape_hatches(label: &str, source: &str) {
+    let normalized = normalize_whitespace(source);
     for hatch in [
         "option \"", // DSL:     option "key": value;
         ".option(",  // builder: .option("key", json!(…))
@@ -295,8 +358,28 @@ fn route_performance_uses_no_raw_escape_hatches() {
         "RawTransformation",
     ] {
         assert!(
-            !body.contains(hatch),
-            "acceptance dashboard must not use the {hatch} escape hatch"
+            !normalized.contains(hatch),
+            "{label} must not use the {hatch} escape hatch"
         );
     }
+}
+
+#[test]
+fn route_performance_uses_no_raw_escape_hatches() {
+    // Covers the dashboard as defined in this test file...
+    let source = include_str!("golden.rs");
+    let dashboard = source
+        .split("fn route_performance_dashboard")
+        .nth(1)
+        .expect("acceptance dashboard should be defined");
+    let body = &dashboard[..dashboard.find("\n}\n").expect("function should close")];
+    assert_no_raw_escape_hatches("the acceptance dashboard", body);
+
+    // ...and the hand-maintained example, which is the artifact a user
+    // actually runs and copies from. It duplicates the same `dashboard!`
+    // invocation rather than importing it (examples cannot import from
+    // `tests/`), so nothing here otherwise guards it against drifting to
+    // include an escape hatch of its own.
+    let example_source = include_str!("../examples/route_performance.rs");
+    assert_no_raw_escape_hatches("the route_performance example", example_source);
 }
