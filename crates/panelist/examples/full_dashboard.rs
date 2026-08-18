@@ -73,7 +73,7 @@ fn main() -> panelist::Result<()> {
         row "Traffic" {
             timeseries "HTTP traffic" {
                 query: promql!(r#"sum by (status) (rate(geoip_http_requests_total{instance=~\"$instance\"}[$__rate_interval]))"#) {
-                    legend: "{{status}}";
+                    legend_format: "{{status}}";
                 }
                 unit: reqps;
                 width: 12;
@@ -81,10 +81,10 @@ fn main() -> panelist::Result<()> {
 
             timeseries "Latency" {
                 query: promql!(r#"histogram_quantile(0.50, sum by (le) (rate(geoip_http_request_duration_seconds_bucket[$__rate_interval])))"#) {
-                    legend: "p50";
+                    legend_format: "p50";
                 }
                 query: promql!(r#"histogram_quantile(0.99, sum by (le) (rate(geoip_http_request_duration_seconds_bucket[$__rate_interval])))"#) {
-                    legend: "p99";
+                    legend_format: "p99";
                 }
                 unit: seconds;
                 width: 12;
@@ -105,7 +105,7 @@ fn main() -> panelist::Result<()> {
         row "Resolution" {
             timeseries "Resolution outcomes / second" {
                 query: promql!(r#"sum by (outcome) (rate(geoip_resolutions_total{instance=~\"$instance\"}[$__rate_interval]))"#) {
-                    legend: "{{outcome}}";
+                    legend_format: "{{outcome}}";
                 }
                 unit: ops;
                 width: 12;

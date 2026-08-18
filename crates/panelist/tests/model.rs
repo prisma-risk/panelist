@@ -21,7 +21,7 @@
 //  limitations under the License.
 //
 
-use panelist::prelude::*;
+use panelist::{ValidationError, prelude::*};
 use serde_json::{Value, json};
 
 fn as_value(dashboard: &Dashboard) -> Value {
@@ -125,14 +125,14 @@ fn collapsed_rows_nest_panels_and_only_consume_the_row_height() {
 #[test]
 fn serializes_units_thresholds_legends_and_overrides() {
     let panel = Timeseries::new("Latency")
-        .query(PrometheusQuery::new("latency").legend("p99"))
+        .query(PrometheusQuery::new("latency").legend_format("p99"))
         .unit(Unit::Milliseconds)
         .thresholds(Thresholds::new().green(0.0).yellow(250.0).red(500.0))
         .legend_options(
             Legend::new()
                 .mode(LegendMode::Table)
                 .placement(LegendPlacement::Right)
-                .calculations([LegendCalculation::Last, LegendCalculation::Max]),
+                .calculations([Reducer::Last, Reducer::Max]),
         )
         .override_field(
             FieldOverride::by_name("p99")
@@ -153,6 +153,35 @@ fn serializes_units_thresholds_legends_and_overrides() {
     );
     assert_eq!(panel["options"]["legend"]["displayMode"], "table");
     assert_eq!(panel["options"]["legend"]["placement"], "right");
+}
+
+#[test]
+fn matchers_cover_queries_names_and_field_classes() {
+    let dashboard = Dashboard::new("Matchers").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("B"))
+            .override_field(FieldOverride::by_query("B").unit(Unit::Percent))
+            .override_field(FieldOverride::by_names(["p50", "p95"]).decimals(2))
+            .override_field(FieldOverride::numeric_fields().decimals(3))
+            .override_field(FieldOverride::time_fields().display_name("When")),
+    );
+
+    let overrides = &as_value(&dashboard)["panels"][0]["fieldConfig"]["overrides"];
+    assert_eq!(
+        overrides[0]["matcher"],
+        json!({"id": "byFrameRefID", "options": "B"})
+    );
+    // `byNames` takes an object, not a bare array: Grafana's
+    // `nameMatcher.ts` destructures `const { names, mode = include } =
+    // options`, so an array yields `names === undefined` and the override
+    // matches nothing. Grafana stores and returns either shape unchanged,
+    // so only the source says which is right.
+    assert_eq!(
+        overrides[1]["matcher"],
+        json!({"id": "byNames", "options": {"names": ["p50", "p95"]}})
+    );
+    assert_eq!(overrides[2]["matcher"], json!({"id": "numeric"}));
+    assert_eq!(overrides[3]["matcher"], json!({"id": "time"}));
 }
 
 #[test]
@@ -362,4 +391,640 @@ fn writes_pretty_json_with_a_trailing_newline() {
 
     assert!(json.starts_with("{\n"));
     assert!(json.ends_with("}\n"));
+}
+
+#[test]
+fn reducers_serialize_for_legends_and_reduce_options() {
+    let dashboard = Dashboard::new("Reducers").panel(
+        Stat::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .reduce_options(ReduceOptions::new().calculations([Reducer::Mean, Reducer::Total])),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(
+        value["panels"][0]["options"]["reduceOptions"]["calcs"],
+        json!(["mean", "sum"])
+    );
+}
+
+#[test]
+fn raw_options_still_override_typed_panel_options() {
+    let dashboard = Dashboard::new("Precedence").panel(
+        Stat::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .color_mode(StatColorMode::Background)
+            .option("colorMode", json!("none")),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(value["panels"][0]["options"]["colorMode"], "none");
+}
+
+#[test]
+fn raw_option_wins_even_when_set_before_the_typed_setter() {
+    let dashboard = Dashboard::new("Precedence before").panel(
+        Stat::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .option("colorMode", json!("none"))
+            .color_mode(StatColorMode::Background),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(value["panels"][0]["options"]["colorMode"], "none");
+}
+
+#[test]
+fn typed_panel_options_survive_a_later_unrelated_option() {
+    let dashboard = Dashboard::new("Merge").panel(
+        Stat::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .color_mode(StatColorMode::Background)
+            .option("textMode", json!("value")),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(value["panels"][0]["options"]["colorMode"], "background");
+    assert_eq!(value["panels"][0]["options"]["textMode"], "value");
+    assert_eq!(value["panels"][0]["options"]["graphMode"], "area");
+}
+
+#[test]
+fn field_config_no_longer_wipes_a_typed_setter() {
+    let dashboard = Dashboard::new("Field config order").panel(
+        Timeseries::new("Latency")
+            .query(PrometheusQuery::new("up"))
+            .fill_opacity(50.0)
+            .field_config(FieldConfig::new().unit(Unit::Seconds)),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(
+        value["panels"][0]["fieldConfig"]["defaults"]["custom"]["fillOpacity"],
+        50.0
+    );
+}
+
+#[test]
+fn cell_survives_a_later_field_config() {
+    let dashboard = Dashboard::new("Cell survives field config").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .cell(TableCellType::Gauge)
+            .field_config(FieldConfig::new().unit(Unit::Seconds)),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(
+        value["panels"][0]["fieldConfig"]["defaults"]["custom"]["cellOptions"],
+        json!({"type": "gauge"})
+    );
+}
+
+#[test]
+fn field_config_custom_still_beats_a_typed_setter_regardless_of_order() {
+    let dashboard = Dashboard::new("Field config custom wins").panel(
+        Timeseries::new("Latency")
+            .query(PrometheusQuery::new("up"))
+            .field_config(FieldConfig::new().custom("lineWidth", json!(9)))
+            .line_width(2.0),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(
+        value["panels"][0]["fieldConfig"]["defaults"]["custom"]["lineWidth"],
+        9
+    );
+}
+
+#[test]
+fn gauge_lowers_orientation_and_reduce_options() {
+    let dashboard = Dashboard::new("Gauge options").panel(
+        Gauge::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .orientation(Orientation::Vertical)
+            .reduce_options(ReduceOptions::new().calculations([Reducer::Max])),
+    );
+
+    let value = as_value(&dashboard);
+    assert_eq!(value["panels"][0]["options"]["orientation"], "vertical");
+    assert_eq!(
+        value["panels"][0]["options"]["reduceOptions"]["calcs"],
+        json!(["max"])
+    );
+}
+
+// The serializer emits panel options in tiers: a kind default, then a typed
+// override, then the raw `.option()` escape hatch. Kind defaults and typed
+// defaults are independent literals (`BTreeMap::extend` replaces whole
+// values), so nothing stops them from drifting apart. These tests pin that
+// the *default* typed value reproduces exactly the kind default it shadows,
+// for every panel kind and key where that duplication exists today.
+
+#[test]
+fn stat_reduce_options_default_matches_kind_default() {
+    let without = as_value(
+        &Dashboard::new("Reduce default")
+            .panel(Stat::new("Value").query(PrometheusQuery::new("up"))),
+    );
+    let with = as_value(
+        &Dashboard::new("Reduce default").panel(
+            Stat::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .reduce_options(ReduceOptions::new()),
+        ),
+    );
+
+    assert_eq!(
+        with["panels"][0]["options"]["reduceOptions"],
+        without["panels"][0]["options"]["reduceOptions"]
+    );
+}
+
+#[test]
+fn gauge_reduce_options_default_matches_kind_default() {
+    let without = as_value(
+        &Dashboard::new("Reduce default")
+            .panel(Gauge::new("Value").query(PrometheusQuery::new("up"))),
+    );
+    let with = as_value(
+        &Dashboard::new("Reduce default").panel(
+            Gauge::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .reduce_options(ReduceOptions::new()),
+        ),
+    );
+
+    assert_eq!(
+        with["panels"][0]["options"]["reduceOptions"],
+        without["panels"][0]["options"]["reduceOptions"]
+    );
+}
+
+#[test]
+fn bar_gauge_reduce_options_default_matches_kind_default() {
+    let without = as_value(
+        &Dashboard::new("Reduce default")
+            .panel(BarGauge::new("Value").query(PrometheusQuery::new("up"))),
+    );
+    let with = as_value(
+        &Dashboard::new("Reduce default").panel(
+            BarGauge::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .reduce_options(ReduceOptions::new()),
+        ),
+    );
+
+    assert_eq!(
+        with["panels"][0]["options"]["reduceOptions"],
+        without["panels"][0]["options"]["reduceOptions"]
+    );
+}
+
+#[test]
+fn timeseries_tooltip_default_matches_kind_default() {
+    let without = as_value(
+        &Dashboard::new("Tooltip default")
+            .panel(Timeseries::new("Value").query(PrometheusQuery::new("up"))),
+    );
+    let with = as_value(
+        &Dashboard::new("Tooltip default").panel(
+            Timeseries::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .tooltip(Tooltip::new()),
+        ),
+    );
+
+    assert_eq!(
+        with["panels"][0]["options"]["tooltip"],
+        without["panels"][0]["options"]["tooltip"]
+    );
+}
+
+#[test]
+fn transformations_serialize_in_authored_order() {
+    let dashboard = Dashboard::new("Transforms").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new(
+                "sum by (route) (rate(requests_total[5m]))",
+            ))
+            .transform(JoinByField::new("route"))
+            .transform(
+                OrganizeFields::new()
+                    .rename("Value #A", "RPS")
+                    .hide("Time")
+                    .order(["route", "RPS"]),
+            )
+            .transform(SortBy::desc("RPS")),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(
+        transformations[0],
+        json!({"id": "joinByField", "options": {"byField": "route", "mode": "outer"}})
+    );
+    // `order` is authored in final names (`RPS`), but Grafana's organize
+    // transformer orders before it renames, so `indexByName` has to be keyed
+    // on the pre-rename name (`Value #A`). `route` is never renamed and
+    // passes through; `excludeByName` is correct as authored because the
+    // filter step runs first of all.
+    assert_eq!(
+        transformations[1],
+        json!({
+            "id": "organize",
+            "options": {
+                "excludeByName": {"Time": true},
+                "indexByName": {"Value #A": 1, "route": 0},
+                "renameByName": {"Value #A": "RPS"},
+            }
+        })
+    );
+    assert_eq!(
+        transformations[2],
+        json!({"id": "sortBy", "options": {"sort": [{"field": "RPS", "desc": true}]}})
+    );
+}
+
+#[test]
+fn organize_ordering_of_an_unrenamed_field_passes_through_untranslated() {
+    let dashboard = Dashboard::new("Order passthrough").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(OrganizeFields::new().order(["route", "status"])),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(
+        transformations[0]["options"]["indexByName"],
+        json!({"route": 0, "status": 1})
+    );
+}
+
+#[test]
+fn organize_ordering_a_name_two_renames_produce_is_rejected() {
+    let dashboard = Dashboard::new("Ambiguous order").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(
+                OrganizeFields::new()
+                    .rename("Value #A", "Latency")
+                    .rename("Value #B", "Latency")
+                    .order(["Latency"]),
+            ),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::AmbiguousOrganizeOrder { field, sources, .. }]
+            if field == "Latency" && sources == &["Value #A".to_owned(), "Value #B".to_owned()]
+    ));
+    let message = errors.errors()[0].to_string();
+    assert!(
+        message.contains("\"Value #A\" and \"Value #B\""),
+        "{message}"
+    );
+}
+
+#[test]
+fn organize_ordering_two_names_onto_one_field_is_rejected() {
+    // `Latency` resolves back to `Value #A`, and `Value #A` — nobody's
+    // rename target — resolves to itself. Both ordering entries would land
+    // on the same `indexByName` key and one would silently overwrite the
+    // other.
+    let dashboard = Dashboard::new("Conflicting order").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(
+                OrganizeFields::new()
+                    .rename("Value #A", "Latency")
+                    .order(["Latency", "Value #A"]),
+            ),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::ConflictingOrganizeOrder { first, second, field, .. }]
+            if first == "Latency" && second == "Value #A" && field == "Value #A"
+    ));
+}
+
+#[test]
+fn organize_ordering_without_ambiguity_passes_validation() {
+    Dashboard::new("Fine")
+        .panel(
+            Table::new("Routes")
+                .query(PrometheusQuery::new("up"))
+                .transform(
+                    OrganizeFields::new()
+                        .rename("Value #A", "RPS")
+                        .rename("Value #B", "Errors")
+                        .hide("Time")
+                        .order(["route", "RPS", "Errors"]),
+                ),
+        )
+        .validate()
+        .unwrap();
+}
+
+#[test]
+fn time_series_to_table_options_are_keyed_by_ref_id() {
+    let dashboard = Dashboard::new("Trend").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .query(PrometheusQuery::new("rate(x[5m])").ref_id("D"))
+            .transform(TimeSeriesToTable::new().query_with("D", Reducer::Last)),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(
+        transformations[0],
+        json!({"id": "timeSeriesTable", "options": {"D": {"stat": "lastNotNull"}}})
+    );
+}
+
+#[test]
+fn join_modes_and_labels_to_fields_serialize() {
+    let dashboard = Dashboard::new("Modes").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(JoinByField::inner("route"))
+            .transform(LabelsToFields::new().keep(["route"]))
+            .transform(RawTransformation::new("myPlugin").option("depth", json!(3))),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(transformations[0]["options"]["mode"], "inner");
+    assert_eq!(
+        transformations[1],
+        json!({"id": "labelsToFields", "options": {"mode": "columns", "keepLabels": ["route"]}})
+    );
+    assert_eq!(
+        transformations[2],
+        json!({"id": "myPlugin", "options": {"depth": 3}})
+    );
+}
+
+#[test]
+fn transformation_filters_target_one_query() {
+    let dashboard = Dashboard::new("Filtered").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .query(PrometheusQuery::new("rate(x[5m])").ref_id("D"))
+            .transform(TimeSeriesToTable::new().query("D").only_ref_id("D"))
+            .transform(SortBy::desc("p95").disabled(true)),
+    );
+
+    let transformations = &as_value(&dashboard)["panels"][0]["transformations"];
+    assert_eq!(
+        transformations[0]["filter"],
+        json!({"id": "byRefId", "options": "D"})
+    );
+    assert_eq!(transformations[1]["disabled"], true);
+    assert!(transformations[1].get("filter").is_none());
+}
+
+#[test]
+fn unknown_transformation_ref_ids_are_rejected() {
+    let dashboard = Dashboard::new("Bad ref").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(TimeSeriesToTable::new().query("Z")),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::UnknownTransformationRefId { ref_id, .. }] if ref_id == "Z"
+    ));
+}
+
+/// One authoring mistake, one error. A transformation that both filters on
+/// a reference ID and names the same one in its own options used to report
+/// the same unknown reference twice.
+#[test]
+fn one_unknown_ref_id_reported_once_even_when_named_twice() {
+    let dashboard = Dashboard::new("Doubled").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(TimeSeriesToTable::new().query("Z").only_ref_id("Z")),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert_eq!(
+        errors.errors().len(),
+        1,
+        "{:?}",
+        errors
+            .errors()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+    );
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::UnknownTransformationRefId { ref_id, .. }] if ref_id == "Z"
+    ));
+}
+
+/// Two genuinely different unknown references are still two errors.
+#[test]
+fn two_unknown_ref_ids_are_reported_separately() {
+    let dashboard = Dashboard::new("Two bad refs").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(TimeSeriesToTable::new().query("Y").only_ref_id("Z")),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert_eq!(errors.errors().len(), 2);
+}
+
+#[test]
+fn auto_assigned_ref_ids_satisfy_transformation_validation() {
+    let dashboard = Dashboard::new("Auto ref").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .query(PrometheusQuery::new("rate(x[5m])"))
+            .transform(TimeSeriesToTable::new().query("B")),
+    );
+
+    dashboard.validate().unwrap();
+}
+
+#[test]
+fn unknown_override_ref_ids_are_rejected() {
+    let dashboard = Dashboard::new("Bad override ref").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .override_field(FieldOverride::by_query("ZZZ").unit(Unit::Percent)),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert!(matches!(
+        errors.errors(),
+        [ValidationError::UnknownOverrideRefId { ref_id, .. }] if ref_id == "ZZZ"
+    ));
+}
+
+#[test]
+fn known_override_ref_ids_pass_validation() {
+    let dashboard = Dashboard::new("Good override ref").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .override_field(FieldOverride::by_query("A").unit(Unit::Percent)),
+    );
+
+    dashboard.validate().unwrap();
+}
+
+#[test]
+fn empty_transformation_fields_are_rejected() {
+    let dashboard = Dashboard::new("Empty").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .transform(JoinByField::new("  "))
+            .transform(RawTransformation::new("")),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    assert_eq!(errors.errors().len(), 2);
+}
+
+#[test]
+fn prometheus_format_serializes_and_is_omitted_by_default() {
+    let dashboard = Dashboard::new("Formats").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up").format(PrometheusFormat::Table))
+            .query(PrometheusQuery::new("rate(x[5m])")),
+    );
+
+    let targets = &as_value(&dashboard)["panels"][0]["targets"];
+    assert_eq!(targets[0]["format"], "table");
+    assert!(targets[1].get("format").is_none());
+}
+
+#[test]
+fn heatmap_format_serializes() {
+    let dashboard = Dashboard::new("Heatmap").panel(Heatmap::new("Latency").query(
+        PrometheusQuery::new("sum by (le) (rate(b[5m]))").format(PrometheusFormat::Heatmap),
+    ));
+
+    assert_eq!(
+        as_value(&dashboard)["panels"][0]["targets"][0]["format"],
+        "heatmap"
+    );
+}
+
+#[test]
+fn cell_types_serialize_through_field_overrides() {
+    let dashboard = Dashboard::new("Cells").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .override_field(
+                FieldOverride::by_name("Error rate").cell_type(TableCellType::ColoredBackground),
+            )
+            .override_field(FieldOverride::by_name("Trend").cell_type(TableCellType::Sparkline)),
+    );
+
+    let overrides = &as_value(&dashboard)["panels"][0]["fieldConfig"]["overrides"];
+    assert_eq!(
+        overrides[0]["properties"][0],
+        json!({"id": "custom.cellOptions", "value": {"type": "color-background"}})
+    );
+    assert_eq!(
+        overrides[1]["properties"][0]["value"],
+        json!({"type": "sparkline"})
+    );
+}
+
+#[test]
+fn cell_options_serialize_per_variant() {
+    let dashboard = Dashboard::new("Cell options").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .override_field(
+                FieldOverride::by_name("Error rate").cell(
+                    ColoredBackgroundCell::new()
+                        .mode(CellBackgroundMode::Gradient)
+                        .apply_to_row(true),
+                ),
+            )
+            .override_field(
+                FieldOverride::by_name("Load").cell(
+                    GaugeCell::new()
+                        .mode(BarGaugeDisplayMode::Lcd)
+                        .value_display(CellValueDisplay::Color),
+                ),
+            )
+            .override_field(
+                FieldOverride::by_name("Trend").cell(
+                    SparklineCell::new()
+                        .hide_value(true)
+                        .line_width(2.0)
+                        .fill_opacity(20.0),
+                ),
+            ),
+    );
+
+    let overrides = &as_value(&dashboard)["panels"][0]["fieldConfig"]["overrides"];
+    assert_eq!(
+        overrides[0]["properties"][0]["value"],
+        json!({"type": "color-background", "mode": "gradient", "applyToRow": true})
+    );
+    assert_eq!(
+        overrides[1]["properties"][0]["value"],
+        json!({"type": "gauge", "mode": "lcd", "valueDisplayMode": "color"})
+    );
+    assert_eq!(
+        overrides[2]["properties"][0]["value"],
+        json!({"type": "sparkline", "hideValue": true, "lineWidth": 2.0, "fillOpacity": 20.0})
+    );
+}
+
+#[test]
+fn table_sorting_serializes_as_a_panel_option() {
+    let dashboard = Dashboard::new("Sorted").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .sort_by("p95", SortDirection::Descending)
+            .sort_by("route", SortDirection::Ascending),
+    );
+
+    assert_eq!(
+        as_value(&dashboard)["panels"][0]["options"]["sortBy"],
+        json!([
+            {"displayName": "p95", "desc": true},
+            {"displayName": "route", "desc": false}
+        ])
+    );
+}
+
+#[test]
+fn heatmap_options_merge_over_grafana_defaults() {
+    let dashboard = Dashboard::new("Heatmap").panel(
+        Heatmap::new("Latency")
+            .query(PrometheusQuery::new("sum by (le) (rate(b[5m]))"))
+            .color_scheme("Blues")
+            .color_steps(32)
+            .cell_gap(2)
+            .show_legend(false)
+            .y_axis_unit(Unit::Seconds)
+            .y_axis_placement(AxisPlacement::Right)
+            .calculate(false),
+    );
+
+    let options = &as_value(&dashboard)["panels"][0]["options"];
+    assert_eq!(
+        options["color"],
+        json!({"mode": "scheme", "scheme": "Blues", "steps": 32})
+    );
+    assert_eq!(options["cellGap"], 2);
+    assert_eq!(options["legend"], json!({"show": false}));
+    assert_eq!(
+        options["yAxis"],
+        json!({"axisPlacement": "right", "unit": "s"})
+    );
+    assert_eq!(options["calculate"], false);
 }

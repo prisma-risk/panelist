@@ -46,6 +46,36 @@ panelist = "0.2"
 The minimum supported Rust version is 1.96. Panelist uses Rust 2024 and has no
 async runtime or network client dependency.
 
+### Breaking changes since 0.2
+
+The following have landed since the 0.2.0 release and are not yet part of
+any published version; they will be reflected in the next release's number
+per [semver](https://semver.org/) and the project's
+[release process](CONTRIBUTING.md#releases).
+
+- `LegendCalculation` was renamed to `Reducer`. Grafana calls this vocabulary
+  `ReducerID`, and Panelist already used it outside legends for
+  `ReduceOptions` on stat, gauge, and bar-gauge panels.
+- `PanelBuilder::legend_options` moved from every panel kind to
+  `PanelBuilder<TimeseriesKind>` only. It only ever affected time-series
+  panels; calling it on a `Stat`, `Gauge`, `Table`, `Text`, or `BarGauge`
+  builder used to compile and silently emit nothing.
+- `FieldConfig::cell()` was removed. Set a table's default cell renderer with
+  `PanelBuilder<TableKind>::cell` instead, which now stores it as typed table
+  options so it survives a later `.field_config()` call the way `.sort_by()`
+  already did.
+- The query legend-format setter was renamed from `legend` to
+  `legend_format`, on `PrometheusQuery`, `LokiQuery`, `RawQuery`, and
+  `PanelBuilder`, and the DSL key `legend:` became `legend_format:` in both
+  the panel body and a query body. Call `legend_format` instead. It sets the
+  datasource's `legendFormat` series-name template and had nothing to do with
+  the visualization legend, which keeps its own names: `legend_options` on the
+  builder and `legend { … }` in the DSL.
+- `TableSort` and `TransformationFilter` narrowed from `pub` to `pub(crate)`
+  and were removed from the prelude. Neither type was ever constructible or
+  acceptable as a parameter from outside the crate, so no external caller
+  should notice.
+
 ## Macro DSL
 
 The macro translates a small amount of syntax into ordinary typed builders. It
@@ -72,7 +102,7 @@ let dashboard = dashboard! {
     row "Latency" {
         timeseries "Request latency" {
             query: promql!("histogram_quantile(0.99, rate(request_duration_seconds_bucket[$__rate_interval]))") {
-                legend: "p99";
+                legend_format: "p99";
             }
             unit: seconds;
             width: 12;
@@ -89,8 +119,86 @@ let dashboard = dashboard! {
 ```
 
 The DSL supports `timeseries`, `stat`, `gauge`, `table`, `text`, `bar_gauge`,
-and `heatmap` panels. `promql!` and `loki!` create typed query builders rather
-than opaque JSON values.
+and `heatmap` panels, and every one of the seven now works identically at
+both dashboard level and row level. `promql!` and `loki!` create typed query
+builders rather than opaque JSON values.
+
+Table panels can transform, sort, and style their columns without leaving
+the DSL:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "Routes";
+    datasource: prometheus("prometheus-main");
+
+    row "Routes" {
+        table "Route performance" {
+            query: promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))") {
+                ref_id: "A";
+                format: table;
+                instant: true;
+            }
+            width: 24;
+
+            transform organize {
+                rename "Value #A" => "RPS";
+                order ["route", "RPS"];
+            }
+            sort_by: ("RPS", desc);
+
+            override field("RPS") {
+                unit: reqps;
+                cell: colored_background;
+            }
+        }
+    }
+};
+# let _ = dashboard;
+```
+
+`transform` accepts `join_by_field`, `sort_by`, `organize`,
+`time_series_to_table`, and `labels_to_fields`, each optionally scoped with
+`only ref_id(..)`; a `transform: <expr>;` escape hatch takes a hand-built
+`RawTransformation` or `Transformation` value for anything else. `override`
+matches fields with `field(name)`, `regex(pattern)`, `type(field_type)`,
+`query(ref_id)`, `names([..])`, `numeric`, or `time`, and can set `cell: auto
+| colored_text | colored_background | gauge | sparkline`, with block forms —
+`colored_background { .. }` and `sparkline { .. }` — when the cell type takes
+its own options. A table panel can also set its own default cell renderer
+with a bare `cell: <type>;` at the panel level.
+
+Heatmap panels configure their color scale and Y axis directly:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "Latency";
+    datasource: prometheus("prometheus-main");
+
+    row "Latency" {
+        heatmap "Latency distribution" {
+            query: promql!("sum by (le) (rate(request_duration_seconds_bucket[$__rate_interval]))") {
+                format: heatmap;
+            }
+            unit: seconds;
+            width: 12;
+            color_scheme: "Oranges";
+            color_steps: 64;
+            cell_gap: 1;
+            calculate: false;
+
+            y_axis {
+                unit: seconds;
+                placement: left;
+            }
+        }
+    }
+};
+# let _ = dashboard;
+```
 
 ## Builder API
 
@@ -103,7 +211,7 @@ use panelist::prelude::*;
 let panel = Timeseries::new("Requests")
     .query(
         PrometheusQuery::new("rate(http_requests_total[$__rate_interval])")
-            .legend("{{status}}"),
+            .legend_format("{{status}}"),
     )
     .unit(Unit::RequestsPerSecond)
     .width(12);
@@ -115,11 +223,17 @@ let dashboard = Dashboard::new("HTTP")
 ```
 
 Typed models cover dashboard metadata, rows, datasources, Prometheus and Loki
-queries, datasource/query/custom/constant variables, persisted variable state,
-time ranges, links, field defaults, value mappings, thresholds, legends, field
-overrides, and common stat, time-series, gauge, and bar-gauge options.
-`RawQuery`, `RawPanel`, and ordered `extra`/`option` methods provide explicit
-escape hatches for Grafana features that Panelist does not model yet.
+queries, Prometheus result formats (time series, table, heatmap),
+datasource/query/custom/constant variables, persisted variable state, time
+ranges, links, field defaults, value mappings, thresholds, legends, field
+overrides and their matchers (`byName`, `byRegexp`, `byType`, `byFrameRefID`,
+`byNames`, `numeric`, and `time`), panel transformations (join, sort,
+organize, time-series-to-table, and labels-to-fields), typed table cell
+rendering (colored text, colored background, gauge, sparkline) and column
+sorting, typed heatmap options, and common stat, time-series, gauge, and
+bar-gauge options. `RawQuery`, `RawPanel`, `RawTransformation`, and ordered
+`extra`/`option`/`custom` methods provide explicit escape hatches for Grafana
+features that Panelist does not model yet.
 
 Real-world provisioning metadata and visualization choices remain typed:
 
@@ -246,14 +360,23 @@ The package examples are compiled as part of the normal test suite:
   reusable Rust fragment
 - [`full_dashboard.rs`](crates/panelist/examples/full_dashboard.rs) — realistic
   GeoIP dashboard using Prometheus and Loki
+- [`route_performance.rs`](crates/panelist/examples/route_performance.rs) —
+  operational dashboard exercising panel transformations, typed table cells
+  and sorting, Prometheus result formats, and heatmap options, with zero
+  escape hatches
 
 Run one with `cargo run -p panelist --example basic`.
 
 ## Roadmap
 
-- Validate generated dashboards against live Grafana 13 in CI.
+- Wire `scripts/verify-grafana.sh` (`make verify-grafana`) into CI so every
+  change is validated against a live Grafana 13 instance automatically; the
+  check itself already exists and round-trips both golden dashboards
+  cleanly today, it just isn't triggered on every push yet.
 - Add an opt-in Grafana V2 resource serializer and dynamic layouts.
-- Expand transformations, annotations, range/regex mappings, and data links.
+- Add annotations, range/regex value mappings, and data links; add more
+  transformation types beyond the five modeled today (join, sort, organize,
+  time-series-to-table, labels-to-fields).
 - Add more datasource query types without turning the core crate into an API
   client.
 - Stabilize the API from real-world dashboard authoring feedback.

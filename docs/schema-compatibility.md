@@ -53,9 +53,75 @@ builders while replacing only layout normalization and the wire model.
 
 ## Current import proof
 
-The committed [`basic.json`](../crates/panelist/tests/golden/basic.json) golden
-dashboard was file-provisioned into Grafana OSS 13.1.0 during the 0.1 bootstrap.
-Grafana loaded it without a provisioning error and returned it from
-`GET /api/dashboards/uid/golden-service` with its row, stat, time series,
-datasource references, variable, thresholds, targets, and grid positions
-preserved. Automating this container check in CI remains a roadmap item.
+On 2026-08-17, both committed golden dashboards were round-tripped through a
+real `grafana/grafana-oss:13.0.2` instance — the newest 13.x image published
+to Docker Hub at the time. (An earlier version of this document claimed the
+0.1 bootstrap import was verified against "Grafana OSS 13.1.0"; that version
+was never published, the claim was wrong, and this section replaces it
+rather than repeating it.)
+
+The check is deliberately stricter than "Grafana accepted the POST and
+returned 200." Grafana accepts a dashboard save even when it silently drops
+a property it does not understand — a 200 status proves Panelist emitted
+valid JSON, not that Grafana kept what was in it. So for each golden,
+[`scripts/verify-grafana.sh`](../scripts/verify-grafana.sh):
+
+1. `POST /api/dashboards/db` the golden JSON with `overwrite: true`.
+2. `GET /api/dashboards/uid/<uid>` it straight back.
+3. Walks the posted document in two categories, checked to different
+   standards:
+   - Every **leaf** — every value that is not itself an object or array,
+     including `null` and `false` — must still be present, with the same
+     value, at the same path in the returned document.
+   - Every **empty container** (`{}` or `[]` in the posted document) must
+     still be present as the same container type (object stays an object,
+     array stays an array), but its *value* is not compared. Grafana
+     routinely adds entries into an empty container on save —
+     `annotations.list: []` picking up Grafana's built-in "Annotations &
+     Alerts" entry is a documented case — and that addition is exactly the
+     kind this check already ignores everywhere else, so comparing values
+     here would misreport a legitimate addition as a drop.
+
+   Additions elsewhere are ignored automatically in both categories (the
+   walk only visits paths the posted document has). The only rewrites
+   ignored are the ones Grafana is documented to make on every save: the
+   top-level `id`, `version`, and `uid`, and each panel's `pluginVersion`.
+   Anything else missing, value-altered (a leaf), or retyped (a container)
+   is reported with its JSON path.
+
+   A fourth outcome, `blocked`, covers the case where a checked path cannot
+   be reached because Grafana returned a scalar where the posted document
+   had a non-empty container. The path walk resolves one segment at a time
+   for this reason: jq's `getpath` treats indexing *through* a scalar as a
+   hard error, which would abort the comparison — and, under
+   `set -euo pipefail`, the whole run, silently skipping every golden later
+   in the loop. A `blocked` report names the offending ancestor and the
+   type it came back as.
+
+Both goldens round-tripped with **zero dropped, altered, retyped, or
+blocked properties**:
+
+- [`basic.json`](../crates/panelist/tests/golden/basic.json) (uid
+  `golden-service`, 97 leaf properties and 6 empty containers checked) —
+  rows, stat and time-series panels, thresholds, datasource references, a
+  custom variable, and grid positions all came back unchanged, including
+  every `false`-valued `hide` flag on a query target, every `collapsed`
+  flag on a row, and every empty container (`timepicker`, `annotations.list`,
+  `links`, the time-series panel's empty `options.legend.calcs`, and both
+  panels' empty `fieldConfig.overrides` arrays).
+- [`route_performance.json`](../crates/panelist/tests/golden/route_performance.json)
+  (uid `route-performance`, 483 leaf properties and 18 empty containers
+  checked) — the acceptance dashboard for the whole typed-transformations
+  effort. Confirmed preserved:
+  panel transformations (`timeSeriesTable`, `joinByField`, and `organize`,
+  chained on the table panel), typed table cell options
+  (`color-background` and `sparkline` cell renderers, including the
+  sparkline's `hideValue`/`lineWidth`), typed table column sorting
+  (`options.sortBy`), Prometheus result formats (`time_series`, `table`, and
+  `heatmap` all exercised across the dashboard's queries), and typed heatmap
+  options (color scheme, color steps, cell gap, calculate, and Y axis unit
+  and placement).
+
+Run `make verify-grafana` to reproduce this check locally. It needs Docker
+and network access, which is why it is not part of `make ci` or the CI
+workflow; wiring it into CI remains a roadmap item.

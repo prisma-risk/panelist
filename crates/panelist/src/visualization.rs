@@ -21,9 +21,26 @@
 //  limitations under the License.
 //
 
-use serde_json::{Value, json};
+use crate::Legend;
 
-use crate::LegendCalculation;
+/// A Grafana reduction applied to a field's values.
+///
+/// Grafana calls this vocabulary `ReducerID`. It is used by table legends,
+/// single-value visualizations, and the time-series-to-table transformation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Reducer {
+    /// Last non-null value.
+    Last,
+    /// Minimum value.
+    Min,
+    /// Maximum value.
+    Max,
+    /// Mean value.
+    Mean,
+    /// Sum.
+    Total,
+}
 
 /// Orientation used by stat, gauge, and bar-gauge visualizations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -35,16 +52,6 @@ pub enum Orientation {
     Horizontal,
     /// Arrange values vertically.
     Vertical,
-}
-
-impl Orientation {
-    pub(crate) const fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::Horizontal => "horizontal",
-            Self::Vertical => "vertical",
-        }
-    }
 }
 
 /// How a stat panel colors its value and background.
@@ -59,16 +66,6 @@ pub enum StatColorMode {
     None,
 }
 
-impl StatColorMode {
-    pub(crate) const fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Value => "value",
-            Self::Background => "background",
-            Self::None => "none",
-        }
-    }
-}
-
 /// Sparkline rendering mode for a stat panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StatGraphMode {
@@ -77,15 +74,6 @@ pub enum StatGraphMode {
     Area,
     /// Hide the sparkline.
     None,
-}
-
-impl StatGraphMode {
-    pub(crate) const fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Area => "area",
-            Self::None => "none",
-        }
-    }
 }
 
 /// Line interpolation used by a time-series panel.
@@ -102,17 +90,6 @@ pub enum LineInterpolation {
     StepAfter,
 }
 
-impl LineInterpolation {
-    pub(crate) const fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Linear => "linear",
-            Self::Smooth => "smooth",
-            Self::StepBefore => "stepBefore",
-            Self::StepAfter => "stepAfter",
-        }
-    }
-}
-
 /// Point marker visibility for time-series panels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PointVisibility {
@@ -123,16 +100,6 @@ pub enum PointVisibility {
     Always,
     /// Never show point markers.
     Never,
-}
-
-impl PointVisibility {
-    pub(crate) const fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::Always => "always",
-            Self::Never => "never",
-        }
-    }
 }
 
 /// Time-series stacking mode.
@@ -147,21 +114,11 @@ pub enum StackingMode {
     Percent,
 }
 
-impl StackingMode {
-    pub(crate) const fn as_grafana(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Normal => "normal",
-            Self::Percent => "percent",
-        }
-    }
-}
-
 /// Stacking configuration for compatible visualizations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stacking {
-    mode: StackingMode,
-    group: String,
+    pub(crate) mode: StackingMode,
+    pub(crate) group: String,
 }
 
 impl Stacking {
@@ -180,10 +137,6 @@ impl Stacking {
         self.group = group.into();
         self
     }
-
-    pub(crate) fn as_grafana(&self) -> Value {
-        json!({"mode": self.mode.as_grafana(), "group": self.group})
-    }
 }
 
 /// Tooltip display mode.
@@ -198,16 +151,6 @@ pub enum TooltipMode {
     None,
 }
 
-impl TooltipMode {
-    pub(crate) const fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Single => "single",
-            Self::Multi => "multi",
-            Self::None => "none",
-        }
-    }
-}
-
 /// Ordering of series inside a visualization tooltip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TooltipSort {
@@ -220,22 +163,12 @@ pub enum TooltipSort {
     Descending,
 }
 
-impl TooltipSort {
-    pub(crate) const fn as_grafana(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Ascending => "asc",
-            Self::Descending => "desc",
-        }
-    }
-}
-
 /// Typed tooltip configuration for compatible panels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Tooltip {
-    mode: TooltipMode,
-    sort: TooltipSort,
-    hide_zeros: bool,
+    pub(crate) mode: TooltipMode,
+    pub(crate) sort: TooltipSort,
+    pub(crate) hide_zeros: bool,
 }
 
 impl Tooltip {
@@ -265,22 +198,14 @@ impl Tooltip {
         self.hide_zeros = hide_zeros;
         self
     }
-
-    pub(crate) fn as_grafana(self) -> Value {
-        json!({
-            "mode": self.mode.as_grafana(),
-            "sort": self.sort.as_grafana(),
-            "hideZeros": self.hide_zeros,
-        })
-    }
 }
 
 /// Reduction applied when a visualization displays one value per field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReduceOptions {
-    values: bool,
-    calculations: Vec<LegendCalculation>,
-    fields: String,
+    pub(crate) values: bool,
+    pub(crate) calculations: Vec<Reducer>,
+    pub(crate) fields: String,
 }
 
 impl ReduceOptions {
@@ -299,10 +224,7 @@ impl ReduceOptions {
 
     /// Replaces the reduction calculations.
     #[must_use]
-    pub fn calculations(
-        mut self,
-        calculations: impl IntoIterator<Item = LegendCalculation>,
-    ) -> Self {
+    pub fn calculations(mut self, calculations: impl IntoIterator<Item = Reducer>) -> Self {
         self.calculations = calculations.into_iter().collect();
         self
     }
@@ -313,27 +235,33 @@ impl ReduceOptions {
         self.fields = fields.into();
         self
     }
-
-    pub(crate) fn as_grafana(&self) -> Value {
-        json!({
-            "values": self.values,
-            "calcs": self
-                .calculations
-                .iter()
-                .map(|calculation| calculation.as_grafana())
-                .collect::<Vec<_>>(),
-            "fields": self.fields,
-        })
-    }
 }
 
 impl Default for ReduceOptions {
     fn default() -> Self {
         Self {
             values: false,
-            calculations: vec![LegendCalculation::Last],
+            calculations: vec![Reducer::Last],
             fields: String::new(),
         }
+    }
+}
+
+/// Ascending or descending ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortDirection {
+    /// Smallest value first.
+    #[default]
+    Ascending,
+    /// Largest value first.
+    Descending,
+}
+
+impl SortDirection {
+    /// Returns whether this direction sorts largest-first.
+    #[must_use]
+    pub const fn is_descending(self) -> bool {
+        matches!(self, Self::Descending)
     }
 }
 
@@ -349,12 +277,60 @@ pub enum BarGaugeDisplayMode {
     Lcd,
 }
 
-impl BarGaugeDisplayMode {
-    pub(crate) const fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Basic => "basic",
-            Self::Gradient => "gradient",
-            Self::Lcd => "lcd",
-        }
-    }
+/// Typed authoring state for the Grafana stat panel.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct StatOptions {
+    pub(crate) color_mode: Option<StatColorMode>,
+    pub(crate) graph_mode: Option<StatGraphMode>,
+    pub(crate) orientation: Option<Orientation>,
+    pub(crate) wide_layout: Option<bool>,
+    pub(crate) reduce: Option<ReduceOptions>,
+}
+
+/// Typed authoring state for the Grafana gauge panel.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct GaugeOptions {
+    pub(crate) orientation: Option<Orientation>,
+    pub(crate) reduce: Option<ReduceOptions>,
+}
+
+/// Typed authoring state for the Grafana time series panel.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct TimeseriesOptions {
+    pub(crate) fill_opacity: Option<f64>,
+    pub(crate) line_width: Option<f64>,
+    pub(crate) point_size: Option<f64>,
+    pub(crate) line_interpolation: Option<LineInterpolation>,
+    pub(crate) show_points: Option<PointVisibility>,
+    pub(crate) span_nulls: Option<bool>,
+    pub(crate) stacking: Option<Stacking>,
+    pub(crate) tooltip: Option<Tooltip>,
+    pub(crate) legend: Option<Legend>,
+}
+
+/// Typed authoring state for the Grafana bar-gauge panel.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct BarGaugeOptions {
+    pub(crate) display_mode: Option<BarGaugeDisplayMode>,
+    pub(crate) orientation: Option<Orientation>,
+    pub(crate) reduce: Option<ReduceOptions>,
+}
+
+/// Where Grafana draws an axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum AxisPlacement {
+    /// Let Grafana choose.
+    #[default]
+    Auto,
+    /// Below the visualization.
+    Bottom,
+    /// Do not draw the axis.
+    Hidden,
+    /// Left of the visualization.
+    Left,
+    /// Right of the visualization.
+    Right,
+    /// Above the visualization.
+    Top,
 }

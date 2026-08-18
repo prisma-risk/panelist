@@ -46,6 +46,7 @@ cargo test -p panelist --test model
 cargo test -p panelist --test macros
 cargo test -p panelist --test golden
 cargo run -p panelist --example full_dashboard
+make verify-grafana  # needs Docker: round-trips the goldens through a real Grafana
 ```
 
 Set `UPDATE_GOLDEN=1` when an intentional wire-format change requires updating

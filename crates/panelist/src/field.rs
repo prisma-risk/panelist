@@ -25,6 +25,8 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use crate::{Reducer, TableCell, TableCellType};
+
 /// A Grafana field unit with common units represented as Rust variants.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -40,8 +42,16 @@ pub enum Unit {
     Bytes,
     /// Bytes per second using IEC scaling (`Bps`).
     BytesPerSecond,
-    /// Percentage in the 0–100 range (`percent`).
+    /// Percentage in the 0–100 range (`percent`). A query yielding a raw
+    /// fraction (0.0–1.0) needs [`Unit::PercentUnit`] instead, or must be
+    /// multiplied by 100 to match this scale.
     Percent,
+    /// Percentage expressed as a 0–1 fraction (`percentunit`), the scale
+    /// Prometheus ratio queries such as `a / b` naturally produce. Contrast
+    /// with [`Unit::Percent`]'s 0–100 range — thresholds authored against
+    /// one scale will not fire correctly if the field actually uses the
+    /// other.
+    PercentUnit,
     /// Requests per second (`reqps`).
     RequestsPerSecond,
     /// Operations per second (`ops`).
@@ -57,21 +67,6 @@ impl Unit {
     #[must_use]
     pub fn custom(unit: impl Into<String>) -> Self {
         Self::Custom(unit.into())
-    }
-
-    pub(crate) fn as_grafana(&self) -> &str {
-        match self {
-            Self::None => "none",
-            Self::Seconds => "s",
-            Self::Milliseconds => "ms",
-            Self::Bytes => "bytes",
-            Self::BytesPerSecond => "Bps",
-            Self::Percent => "percent",
-            Self::RequestsPerSecond => "reqps",
-            Self::OperationsPerSecond => "ops",
-            Self::Short => "short",
-            Self::Custom(value) => value,
-        }
     }
 }
 
@@ -100,18 +95,6 @@ impl Color {
     #[must_use]
     pub fn custom(color: impl Into<String>) -> Self {
         Self::Custom(color.into())
-    }
-
-    pub(crate) fn as_grafana(&self) -> &str {
-        match self {
-            Self::Green => "green",
-            Self::Yellow => "yellow",
-            Self::Red => "red",
-            Self::Blue => "blue",
-            Self::Orange => "orange",
-            Self::Purple => "purple",
-            Self::Custom(value) => value,
-        }
     }
 }
 
@@ -307,6 +290,10 @@ impl FieldConfig {
     }
 
     /// Adds a plugin-specific field default.
+    ///
+    /// This escape hatch is applied after every typed field-custom setter
+    /// (e.g. `PanelBuilder::line_width`), so it wins over the equivalent
+    /// typed value regardless of call order.
     #[must_use]
     pub fn custom(mut self, key: impl Into<String>, value: Value) -> Self {
         self.custom.insert(key.into(), value);
@@ -331,6 +318,14 @@ pub enum OverrideMatcher {
     Regex(String),
     /// Match a Grafana field type such as `number` or `string`.
     Type(String),
+    /// Match every field returned by one query reference ID.
+    QueryRefId(String),
+    /// Match an explicit list of field names.
+    Names(Vec<String>),
+    /// Match every numeric field.
+    Numeric,
+    /// Match every time field.
+    Time,
 }
 
 /// A typed or custom field override property.
@@ -353,6 +348,8 @@ pub enum OverrideProperty {
     LineWidth(u8),
     /// Override thresholds for the selected fields.
     Thresholds(Thresholds),
+    /// Override the table cell renderer.
+    Cell(TableCell),
     /// Explicit Grafana property escape hatch.
     Custom {
         /// Grafana field-property identifier.
@@ -397,11 +394,77 @@ impl FieldOverride {
         }
     }
 
+    /// Matches every field returned by one query.
+    #[must_use]
+    pub fn by_query(ref_id: impl Into<String>) -> Self {
+        Self {
+            matcher: OverrideMatcher::QueryRefId(ref_id.into()),
+            properties: Vec::new(),
+        }
+    }
+
+    /// Matches an explicit list of field names.
+    #[must_use]
+    pub fn by_names(names: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            matcher: OverrideMatcher::Names(names.into_iter().map(Into::into).collect()),
+            properties: Vec::new(),
+        }
+    }
+
+    /// Matches every numeric field.
+    #[must_use]
+    pub fn numeric_fields() -> Self {
+        Self {
+            matcher: OverrideMatcher::Numeric,
+            properties: Vec::new(),
+        }
+    }
+
+    /// Matches every time field.
+    #[must_use]
+    pub fn time_fields() -> Self {
+        Self {
+            matcher: OverrideMatcher::Time,
+            properties: Vec::new(),
+        }
+    }
+
     /// Appends an override property.
     #[must_use]
     pub fn property(mut self, property: OverrideProperty) -> Self {
         self.properties.push(property);
         self
+    }
+
+    /// Sets the field unit.
+    #[must_use]
+    pub fn unit(self, unit: Unit) -> Self {
+        self.property(OverrideProperty::Unit(unit))
+    }
+
+    /// Sets the field minimum.
+    #[must_use]
+    pub fn min(self, min: f64) -> Self {
+        self.property(OverrideProperty::Min(min))
+    }
+
+    /// Sets the field maximum.
+    #[must_use]
+    pub fn max(self, max: f64) -> Self {
+        self.property(OverrideProperty::Max(max))
+    }
+
+    /// Sets the displayed decimal count.
+    #[must_use]
+    pub fn decimals(self, decimals: u8) -> Self {
+        self.property(OverrideProperty::Decimals(decimals))
+    }
+
+    /// Sets the display name.
+    #[must_use]
+    pub fn display_name(self, display_name: impl Into<String>) -> Self {
+        self.property(OverrideProperty::DisplayName(display_name.into()))
     }
 
     /// Sets a fixed color.
@@ -420,6 +483,18 @@ impl FieldOverride {
     #[must_use]
     pub fn thresholds(self, thresholds: Thresholds) -> Self {
         self.property(OverrideProperty::Thresholds(thresholds))
+    }
+
+    /// Sets the table cell renderer for the selected fields.
+    #[must_use]
+    pub fn cell(self, cell: impl Into<TableCell>) -> Self {
+        self.property(OverrideProperty::Cell(cell.into()))
+    }
+
+    /// Sets the table cell renderer using its default options.
+    #[must_use]
+    pub fn cell_type(self, cell_type: TableCellType) -> Self {
+        self.cell(cell_type)
     }
 }
 
@@ -445,40 +520,12 @@ pub enum LegendPlacement {
     Right,
 }
 
-/// A calculation displayed in a table legend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum LegendCalculation {
-    /// Last non-null value.
-    Last,
-    /// Minimum value.
-    Min,
-    /// Maximum value.
-    Max,
-    /// Mean value.
-    Mean,
-    /// Sum.
-    Total,
-}
-
-impl LegendCalculation {
-    pub(crate) fn as_grafana(self) -> &'static str {
-        match self {
-            Self::Last => "lastNotNull",
-            Self::Min => "min",
-            Self::Max => "max",
-            Self::Mean => "mean",
-            Self::Total => "sum",
-        }
-    }
-}
-
 /// Common legend settings.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Legend {
     pub(crate) mode: LegendMode,
     pub(crate) placement: LegendPlacement,
-    pub(crate) calculations: Vec<LegendCalculation>,
+    pub(crate) calculations: Vec<Reducer>,
 }
 
 impl Legend {
@@ -504,10 +551,7 @@ impl Legend {
 
     /// Replaces the displayed calculations.
     #[must_use]
-    pub fn calculations(
-        mut self,
-        calculations: impl IntoIterator<Item = LegendCalculation>,
-    ) -> Self {
+    pub fn calculations(mut self, calculations: impl IntoIterator<Item = Reducer>) -> Self {
         self.calculations = calculations.into_iter().collect();
         self
     }
