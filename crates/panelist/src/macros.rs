@@ -498,6 +498,18 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.color_steps($steps);
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    ($panel:ident; graph_mode: $mode:ident; $($rest:tt)*) => {
+        $panel = $panel.graph_mode($crate::__panelist_stat_graph_mode!($mode));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; orientation: $orientation:ident; $($rest:tt)*) => {
+        $panel = $panel.orientation($crate::__panelist_orientation!($orientation));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; display_mode: $mode:ident; $($rest:tt)*) => {
+        $panel = $panel.display_mode($crate::__panelist_bar_gauge_display_mode!($mode));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; color_mode: scheme; $($rest:tt)*) => {
         $panel = $panel.color_mode($crate::HeatmapColorMode::Scheme);
         $crate::__panelist_panel_items!($panel; $($rest)*);
@@ -547,6 +559,45 @@ macro_rules! __panelist_y_axis_items {
     ($panel:ident; placement: $placement:ident; $($rest:tt)*) => {
         $panel = $panel.y_axis_placement($crate::__panelist_axis_placement!($placement));
         $crate::__panelist_y_axis_items!($panel; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_stat_graph_mode {
+    (area) => {
+        $crate::StatGraphMode::Area
+    };
+    (none) => {
+        $crate::StatGraphMode::None
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_orientation {
+    (auto) => {
+        $crate::Orientation::Auto
+    };
+    (horizontal) => {
+        $crate::Orientation::Horizontal
+    };
+    (vertical) => {
+        $crate::Orientation::Vertical
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_bar_gauge_display_mode {
+    (basic) => {
+        $crate::BarGaugeDisplayMode::Basic
+    };
+    (gradient) => {
+        $crate::BarGaugeDisplayMode::Gradient
+    };
+    (lcd) => {
+        $crate::BarGaugeDisplayMode::Lcd
     };
 }
 

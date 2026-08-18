@@ -739,3 +739,87 @@ fn table_panel_default_cell_and_remaining_cell_variants_dsl_matches_the_builder_
         from_builder.to_json_pretty().unwrap()
     );
 }
+
+/// Every variant is deliberately a NON-default one: `StatGraphMode::Area`,
+/// `Orientation::Auto` and `BarGaugeDisplayMode::Gradient` are the
+/// `#[default]`s, and this test's whole job is to catch a DSL arm that
+/// silently does nothing. A default-valued variant on a bare (non-`Option`)
+/// field would leave both sides equal whether the arm fires or not, so the
+/// assertion would pass against a macro that dropped the rule entirely.
+#[test]
+fn panel_option_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Panel options";
+
+        stat "Requests" {
+            query: promql!("rate(requests_total[5m])");
+            graph_mode: none;
+            orientation: vertical;
+        }
+
+        gauge "Saturation" {
+            query: promql!("saturation");
+            orientation: horizontal;
+        }
+
+        bar_gauge "Top routes" {
+            query: promql!("topk(10, rate(requests_total[5m]))");
+            display_mode: lcd;
+            orientation: horizontal;
+        }
+    };
+
+    let from_builder = Dashboard::new("Panel options")
+        .panel(
+            Stat::new("Requests")
+                .query(PrometheusQuery::new("rate(requests_total[5m])"))
+                .graph_mode(StatGraphMode::None)
+                .orientation(Orientation::Vertical),
+        )
+        .panel(
+            Gauge::new("Saturation")
+                .query(PrometheusQuery::new("saturation"))
+                .orientation(Orientation::Horizontal),
+        )
+        .panel(
+            BarGauge::new("Top routes")
+                .query(PrometheusQuery::new("topk(10, rate(requests_total[5m]))"))
+                .display_mode(BarGaugeDisplayMode::Lcd)
+                .orientation(Orientation::Horizontal),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// Pins the emitted wire values, not just DSL/builder agreement. The parity
+/// test above compares the two surfaces to each other, so it stays green if
+/// BOTH are wrong; this one is the check that can disagree with them.
+#[test]
+fn panel_option_dsl_emits_the_grafana_wire_values() {
+    let json = dashboard! {
+        title: "Panel options";
+
+        stat "Requests" {
+            query: promql!("up");
+            graph_mode: none;
+            orientation: vertical;
+        }
+
+        bar_gauge "Top routes" {
+            query: promql!("up");
+            display_mode: lcd;
+        }
+    };
+    let json: serde_json::Value = serde_json::from_str(&json.to_json().unwrap()).unwrap();
+
+    assert_eq!(json["panels"][0]["options"]["graphMode"], json!("none"));
+    assert_eq!(
+        json["panels"][0]["options"]["orientation"],
+        json!("vertical")
+    );
+    assert_eq!(json["panels"][1]["options"]["displayMode"], json!("lcd"));
+}
