@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The uids are not cosmetic. A dashboard references its datasource by uid,
+# so these have to match what the examples author:
+#
+#   prometheus("prometheus")       basic, prometheus, variables, layout,
+#                                  full_dashboard
+#   prometheus("prometheus-main")  route_performance
+#   loki("loki")                   full_dashboard's failure log panel
+#
+# `basic` and `layout` set no dashboard datasource at all, which is why one
+# Prometheus entry is marked default.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 5s
+
+  - name: Prometheus (main)
+    uid: prometheus-main
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    jsonData:
+      timeInterval: 5s
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100

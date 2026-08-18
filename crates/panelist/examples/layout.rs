@@ -21,6 +21,12 @@
 //  limitations under the License.
 //
 
+// Examples print the dashboard JSON so that `cargo run --example <name>`
+// is useful on its own, and so the demo stack in `examples/demo` can
+// provision the very same dashboards a reader builds. The workspace
+// otherwise denies printing to stdout.
+#![allow(clippy::print_stdout)]
+
 use panelist::prelude::*;
 
 fn service_stats(service: &str) -> Vec<Panel> {
@@ -43,7 +49,7 @@ fn service_stats(service: &str) -> Vec<Panel> {
             .query(PrometheusQuery::new(format!(
                 "avg_over_time(up{{job=\"{service}\"}}[$__rate_interval])"
             )))
-            .unit(Unit::Percent)
+            .unit(Unit::PercentUnit)
             .width(8)
             .into(),
     ]
@@ -53,12 +59,14 @@ fn main() -> panelist::Result<()> {
     let panels = service_stats("checkout");
     let dashboard = dashboard! {
         title: "Automatic layout";
+        uid: "layout";
 
         row "Golden signals" {
             panels: panels;
         }
     };
 
-    let _json = dashboard.to_json_pretty()?;
+    dashboard.validate()?;
+    println!("{}", dashboard.to_json_pretty()?);
     Ok(())
 }

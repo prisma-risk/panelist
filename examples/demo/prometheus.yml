@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Job names are load-bearing: `full_dashboard` queries `up{job="geoip"}` and
+# `layout` queries `up{job="checkout"}`, so renaming a job here silently
+# empties a panel there.
+#
+# The `environment` labels exist for the `variables` example, whose
+# `instance` variable is `label_values(up{environment="$environment"},
+# instance)`. Without them that dropdown would be empty and every panel
+# filtered by `$instance` would return nothing.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: app
+    static_configs:
+      - targets: ["exporter:9101"]
+        labels:
+          environment: production
+      - targets: ["exporter:9102"]
+        labels:
+          environment: staging
+
+  - job_name: geoip
+    static_configs:
+      - targets: ["exporter:9103"]
+        labels:
+          environment: production
+      - targets: ["exporter:9104"]
+        labels:
+          environment: staging
+
+  - job_name: checkout
+    static_configs:
+      - targets: ["exporter:9105"]
+        labels:
+          environment: production

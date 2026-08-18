@@ -21,6 +21,12 @@
 //  limitations under the License.
 //
 
+// Examples print the dashboard JSON so that `cargo run --example <name>`
+// is useful on its own, and so the demo stack in `examples/demo` can
+// provision the very same dashboards a reader builds. The workspace
+// otherwise denies printing to stdout.
+#![allow(clippy::print_stdout)]
+
 use panelist::prelude::*;
 
 fn main() -> panelist::Result<()> {
@@ -40,8 +46,8 @@ fn main() -> panelist::Result<()> {
 
         row "Overview" {
             stat "Availability" {
-                query: promql!("avg_over_time(up{job=\"geoip\"}[$__rate_interval])");
-                unit: percent;
+                query: promql!("avg(avg_over_time(up{job=\"geoip\"}[$__rate_interval]))");
+                unit: percent_unit;
                 width: 6;
 
                 thresholds {
@@ -72,7 +78,7 @@ fn main() -> panelist::Result<()> {
 
         row "Traffic" {
             timeseries "HTTP traffic" {
-                query: promql!(r#"sum by (status) (rate(geoip_http_requests_total{instance=~\"$instance\"}[$__rate_interval]))"#) {
+                query: promql!(r#"sum by (status) (rate(geoip_http_requests_total{instance=~"$instance"}[$__rate_interval]))"#) {
                     legend_format: "{{status}}";
                 }
                 unit: reqps;
@@ -104,7 +110,7 @@ fn main() -> panelist::Result<()> {
 
         row "Resolution" {
             timeseries "Resolution outcomes / second" {
-                query: promql!(r#"sum by (outcome) (rate(geoip_resolutions_total{instance=~\"$instance\"}[$__rate_interval]))"#) {
+                query: promql!(r#"sum by (outcome) (rate(geoip_resolutions_total{instance=~"$instance"}[$__rate_interval]))"#) {
                     legend_format: "{{outcome}}";
                 }
                 unit: ops;
@@ -112,9 +118,21 @@ fn main() -> panelist::Result<()> {
             }
 
             table "Failures" {
-                query: loki!(r#"{service=\"geoip\"} |= \"resolution failed\""#);
+                query: loki!(r#"{service="geoip"} |= "resolution failed""#);
                 datasource: loki("loki");
                 width: 12;
+
+                // A Loki log frame arrives with its stream labels, its
+                // nanosecond timestamp, and its label-type map alongside the
+                // line itself. Rendered as-is, the table is four columns of
+                // JSON with the message squeezed out of view.
+                transform organize {
+                    hide "labels";
+                    hide "tsNs";
+                    hide "labelTypes";
+                    hide "id";
+                    order ["Time", "Line"];
+                }
             }
         }
 
@@ -127,6 +145,6 @@ fn main() -> panelist::Result<()> {
     };
 
     dashboard.validate()?;
-    let _json = dashboard.to_json_pretty()?;
+    println!("{}", dashboard.to_json_pretty()?);
     Ok(())
 }

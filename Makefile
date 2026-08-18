@@ -1,7 +1,7 @@
 CARGO ?= cargo
 CARGO_DENY_CHECK_FLAGS ?=
 
-.PHONY: all ci check fmt fmt-check lint fix build test doc headers package release-dry-run deny verify-grafana clean help
+.PHONY: all ci check fmt fmt-check lint fix build test doc headers package release-dry-run deny verify-grafana demo demo-down render-examples clean help
 
 all: ci
 
@@ -48,6 +48,15 @@ deny:
 verify-grafana:
 	scripts/verify-grafana.sh
 
+demo:
+	scripts/demo.sh up
+
+demo-down:
+	scripts/demo.sh down
+
+render-examples:
+	scripts/demo.sh render
+
 clean:
 	$(CARGO) clean
 
@@ -68,4 +77,7 @@ help:
 	@echo "  make release-dry-run  Validate the crates.io upload without publishing"
 	@echo "  make deny         Check licenses and advisories"
 	@echo "  make verify-grafana  Round-trip golden dashboards through Grafana (needs Docker)"
+	@echo "  make demo         Boot the example dashboards on a live Grafana (needs Docker)"
+	@echo "  make render-examples  Re-render the gallery screenshots from the demo stack"
+	@echo "  make demo-down    Stop the demo stack"
 	@echo "  make clean        Remove Cargo build output"
