@@ -1,11 +1,11 @@
 CARGO ?= cargo
 CARGO_DENY_CHECK_FLAGS ?=
 
-.PHONY: all ci check fmt fmt-check lint fix build test doc headers package release-dry-run deny verify-grafana demo demo-down render-examples clean help
+.PHONY: all ci check fmt fmt-check lint fix build test doc headers workflow-check package release-dry-run deny verify-grafana demo demo-down render-examples clean help
 
 all: ci
 
-ci: check headers package deny
+ci: check headers workflow-check package deny
 
 check: fmt-check lint build test doc
 
@@ -35,6 +35,9 @@ doc:
 headers:
 	python3 scripts/check-panelist-header.py
 	cmp LICENSE crates/panelist/LICENSE
+
+workflow-check:
+	python3 scripts/tests/release-workflow-test.py
 
 package:
 	$(CARGO) package -p panelist --allow-dirty --locked
@@ -73,6 +76,7 @@ help:
 	@echo "  make test         Test the locked workspace"
 	@echo "  make doc          Build rustdoc with warnings denied"
 	@echo "  make headers      Verify Rust source headers"
+	@echo "  make workflow-check  Verify release workflow trust gates"
 	@echo "  make package      Verify the distributable crate tarball"
 	@echo "  make release-dry-run  Validate the crates.io upload without publishing"
 	@echo "  make deny         Check licenses and advisories"

@@ -1,14 +1,22 @@
 name: release-plz
 
-# Manually dispatch this workflow to open or update the release PR. Merging that
-# PR changes release-plz-owned CHANGELOG.md and automatically publishes it.
+# Manually dispatch this workflow to open or update the release PR. Closing that
+# PR after a trusted merge automatically publishes it. The explicit `release`
+# dispatch remains available to recover a failed post-merge publication.
 on:
   workflow_dispatch:
-  push:
+    inputs:
+      command:
+        description: Release operation
+        type: choice
+        options:
+          - release-pr
+          - release
+        default: release-pr
+  pull_request:
+    types: [closed]
     branches:
       - main
-    paths:
-      - '**/CHANGELOG.md'
 
 permissions:
   contents: read
@@ -18,7 +26,20 @@ env:
 
 jobs:
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'closed' &&
+       github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.base.ref == github.event.repository.default_branch &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+       github.event.pull_request.user.id == 286791072 &&
+       github.event.pull_request.user.login == 'prismarisk-public-release[bot]' &&
+       github.event.pull_request.user.type == 'Bot') ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.command == 'release' &&
+       github.ref == 'refs/heads/main')
     name: release-plz release
     runs-on: ubuntu-latest
     environment: crates-io
@@ -70,7 +91,10 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   release-pr:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.command == 'release-pr' &&
+      github.ref == 'refs/heads/main'
     name: release-plz PR
     runs-on: ubuntu-latest
     permissions:
