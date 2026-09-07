@@ -62,7 +62,7 @@ jobs:
           git config --global gpg.format x509
           git config --global tag.gpgSign true
           git config --global gitsign.rekorMode offline
-      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5
+      - uses: release-plz/action@b5543c19b03be9bd48852d20ca89f478b7723260 # v0.5
         with:
           command: release
         env:
@@ -93,7 +93,7 @@ jobs:
         with:
           toolchain: 1.96.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6a # v2.9.2
-      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5
+      - uses: release-plz/action@b5543c19b03be9bd48852d20ca89f478b7723260 # v0.5
         with:
           command: release-pr
         env:
