@@ -2,6 +2,9 @@
 name: CI
 
 on:
+  # Full merged-source validation, independent of reusable PR evidence.
+  schedule:
+    - cron: '7 10 * * *'
   push:
     branches: [main]
   pull_request:
@@ -14,7 +17,58 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  ci-policy-tests:
+    name: CI execution policy regressions
+    needs: [ci-policy]
+    if: ${{ !cancelled() && !(needs.ci-policy.result == 'success' && needs.ci-policy.outputs.validate == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6.1.0
+        with:
+          node-version: "24"
+      - run: node --test .github/scripts/ci-execution-policy.test.cjs .github/scripts/ci-execution-policy.workflow.test.cjs
+
+  ci-policy:
+    name: CI execution policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      validate: ${{ steps.policy.outputs.validate }}
+    steps:
+      - name: Check out trusted policy source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: policy
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            // Only a main push loads repository policy; PRs always validate.
+            if (context.eventName !== 'push' || context.ref !== 'refs/heads/main') {
+              core.setOutput('validate', 'true');
+              core.info('Run normal validation (PR, daily health check, manual run, or non-main push)');
+              return;
+            }
+            const ciExecutionPolicy = require(process.env.GITHUB_WORKSPACE + '/.github/scripts/ci-execution-policy.cjs');
+            await ciExecutionPolicy({ github, context, core });
+
   rust:
+    if: >-
+      !cancelled() &&
+      !(needs.ci-policy.result == 'success' && needs.ci-policy.outputs.validate == 'false')
+    needs: [ci-policy]
     name: Rust
     runs-on: ubuntu-latest
     steps:
@@ -42,6 +96,10 @@ jobs:
         run: cargo package -p panelist --locked
 
   supply-chain:
+    if: >-
+      !cancelled() &&
+      !(needs.ci-policy.result == 'success' && needs.ci-policy.outputs.validate == 'false')
+    needs: [ci-policy]
     name: Supply chain
     runs-on: ubuntu-latest
     steps:
@@ -53,6 +111,10 @@ jobs:
           rust-version: "1.96.1"
 
   source-headers:
+    if: >-
+      !cancelled() &&
+      !(needs.ci-policy.result == 'success' && needs.ci-policy.outputs.validate == 'false')
+    needs: [ci-policy]
     name: Source headers
     runs-on: ubuntu-latest
     steps:
