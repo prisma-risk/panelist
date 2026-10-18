@@ -710,6 +710,31 @@ let dashboard = dashboard! {
 # let _ = dashboard;
 ```
 
+### Composing PromQL
+
+Expressions stay plain strings, but two parts of them are painful to splice with `format!`: label selectors, whose braces must be doubled, and legend formats, where Grafana's `{{label}}` becomes `{{{{label}}}}`. `Selector` and `legend!` take care of both:
+
+```rust
+use panelist::prelude::*;
+
+let base = Matchers::new().eq("job", "api").re("instance", "$instance");
+let requests = Selector::metric("http_requests_total").with(&base);
+let errors = requests.clone().re("status", "5..");
+
+let panel = Timeseries::new("Error ratio by route")
+    .query(
+        PrometheusQuery::new(format!(
+            "sum by (route) (rate({})) / sum by (route) (rate({}))",
+            errors.range("$__rate_interval"),
+            requests.range("$__rate_interval"),
+        ))
+        .legend_format(legend!("{route} · errors")),
+    );
+# let _ = panel;
+```
+
+`Selector` quotes and escapes label values, keeps matchers in insertion order, and passes Grafana variables through. A range attaches to the selector itself, so a factored-out selector cannot turn `rate(metric{…}[5m])` into the stepless subquery `rate((metric{…})[5m])`. `legend!` turns `{label}` into `{{label}}` and rejects anything that is not a Prometheus label name at compile time; `legend()` does the same at run time and returns a `LegendFormatError`.
+
 ## Serialization and validation
 
 `Dashboard` implements `serde::Serialize`, so normal `serde_json` APIs work.
@@ -782,6 +807,36 @@ Grafana's global variables need no declaration: `$__rate_interval`, `$__interval
 Grafana resolves variables in declaration order. A chained query variable may only reference variables declared before it, in its query or its datasource. A query variable that inherits the dashboard datasource needs that datasource's variable declared first too. Breaking the order is a `ValidationError::VariableReferencedBeforeDeclaration`. Panels resolve after every variable, so order does not matter to them.
 
 Some `$` signs are not references and never trip the check. Variable `regex` options are not scanned, so anchors like `/^(prod|staging)$/` are fine. Capture references like `$1` and `${1}` in `label_replace` are ignored, because no variable can have an all-digit name. A `$` followed by no name, as in `"^api$"`, starts no reference.
+
+## Inspecting dashboards
+
+Validation catches what Panelist knows is wrong. Your own rules, like "every stat states its thresholds" or "every query against a slow job sets its interval", belong in your tests. `Dashboard::resolve` gives those tests a typed, read-only view, so they never parse the JSON back:
+
+```rust
+use panelist::prelude::*;
+
+fn check(dashboard: &Dashboard) -> panelist::Result<()> {
+    for panel in dashboard.resolve()?.panels() {
+        if matches!(panel.kind(), PanelKind::Stat) {
+            assert!(
+                panel.field_config().thresholds().is_some(),
+                "stat {:?} inherits Grafana's default thresholds",
+                panel.title()
+            );
+        }
+        for query in panel.queries() {
+            if query.expression().is_some_and(|expr| expr.contains("job=\"batch-exporter\"")) {
+                assert_eq!(query.interval(), Some("1m"), "query {} in {:?}", query.ref_id(), panel.title());
+            }
+        }
+    }
+    Ok(())
+}
+# check(&Dashboard::new("Example"))?;
+# Ok::<(), panelist::Error>(())
+```
+
+The view comes from the same pass that serialization runs, so it shows exactly what Grafana receives. Panel IDs, query reference IDs, and grid positions are filled in. Each panel and query reports the datasource it actually inherits. `panels()` also visits panels inside collapsed rows, which a walk over the JSON's top-level `panels` array silently skips. Units, colors, thresholds, and override matchers stay typed values, not strings to compare.
 
 ## Grafana compatibility
 

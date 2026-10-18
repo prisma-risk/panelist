@@ -28,12 +28,11 @@ use serde_json::{Value, json};
 
 use crate::{
     CellBackgroundMode, CellValueDisplay, ColorScheme, FieldConfig, FieldOverride, OverrideMatcher,
-    OverrideProperty, PanelKind, Query, SpecialValue, Stacking, TableCell, ThresholdMode,
-    Thresholds, ValueMapping, field::ValueMatch, panel::PanelOptions,
+    OverrideProperty, PanelKind, SpecialValue, Stacking, TableCell, ThresholdMode, Thresholds,
+    ValueMapping, field::ValueMatch, panel::PanelOptions, resolved::ResolvedThresholds,
 };
 
 use super::link::data_links_value;
-use super::query::query_field_overrides;
 use super::vocabulary::{
     color, continuous_palette, line_interpolation, point_visibility, stacking_mode, unit,
 };
@@ -41,10 +40,10 @@ use super::wire::{
     GrafanaFieldConfig, GrafanaFieldOverride, GrafanaMatcher, GrafanaOverrideProperty,
 };
 
-/// Lowers a panel's field config. `queries` contribute their own field properties as overrides, emitted ahead of the panel's (see `super::query::query_field_overrides`).
+/// Lowers a panel's field config. `overrides` is the panel's resolved override list, which already places the queries' own field properties ahead of the panel's (see `super::query::query_field_overrides`).
 pub(crate) fn normalize_field_config(
     config: &FieldConfig,
-    queries: &[Query],
+    overrides: &[FieldOverride],
     kind: &PanelKind,
     kind_options: &PanelOptions,
 ) -> GrafanaFieldConfig {
@@ -82,11 +81,7 @@ pub(crate) fn normalize_field_config(
 
     GrafanaFieldConfig {
         defaults,
-        overrides: query_field_overrides(queries)
-            .iter()
-            .chain(&config.overrides)
-            .map(normalize_override)
-            .collect(),
+        overrides: overrides.iter().map(normalize_override).collect(),
     }
 }
 
@@ -369,20 +364,16 @@ pub(crate) fn color_scheme_value(scheme: &ColorScheme) -> Value {
 
 /// Grafana's step list: the base step, with a `null` value, then each authored step.
 pub(crate) fn thresholds_value(thresholds: &Thresholds) -> Value {
-    let steps = std::iter::once(json!({"color": color(&thresholds.base), "value": null}))
-        .chain(thresholds.steps.iter().map(|step| {
-            json!({
-                "color": color(&step.color),
-                "value": step.value,
-            })
-        }))
-        .collect::<Vec<_>>();
+    let resolved = ResolvedThresholds::from(thresholds);
     json!({
-        "mode": match thresholds.mode {
+        "mode": match resolved.mode() {
             ThresholdMode::Absolute => "absolute",
             ThresholdMode::Percentage => "percentage",
         },
-        "steps": steps,
+        "steps": resolved
+            .steps()
+            .map(|step| json!({"color": color(step.color()), "value": step.value()}))
+            .collect::<Vec<_>>(),
     })
 }
 

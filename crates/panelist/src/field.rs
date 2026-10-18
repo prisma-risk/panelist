@@ -676,6 +676,18 @@ impl FieldOverride {
         }
     }
 
+    /// Returns the matcher that selects the overridden fields.
+    #[must_use]
+    pub fn matcher(&self) -> &OverrideMatcher {
+        &self.matcher
+    }
+
+    /// Returns the override properties in authored order.
+    #[must_use]
+    pub fn properties(&self) -> &[OverrideProperty] {
+        &self.properties
+    }
+
     /// Appends an override property.
     #[must_use]
     pub fn property(mut self, property: OverrideProperty) -> Self {

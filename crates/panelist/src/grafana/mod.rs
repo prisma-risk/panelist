@@ -23,7 +23,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::{Dashboard, DashboardItem, ValidationErrors};
+use crate::{Dashboard, ValidationErrors, resolved::ResolvedItem};
 
 mod annotation;
 mod field;
@@ -32,6 +32,7 @@ mod link;
 mod panel;
 mod query;
 mod references;
+mod resolve;
 mod transform;
 mod validate;
 mod validate_options;
@@ -40,75 +41,29 @@ mod vocabulary;
 mod wire;
 
 pub(crate) use query::effective_ref_ids;
+pub(crate) use resolve::resolve;
 pub(crate) use wire::NormalizedDashboard;
 
-use layout::{FlowLayout, assign_panel_ids};
 use panel::{normalize_panel, normalize_row};
-use validate::validate;
 use variable::normalize_variable;
 use wire::{GrafanaAnnotations, GrafanaLink, GrafanaTemplating, GrafanaTimeRange};
 
 pub(crate) fn normalize(dashboard: &Dashboard) -> Result<NormalizedDashboard, ValidationErrors> {
-    // Both passes run before either reports, so one call lists every mistake.
-    let ids = match (validate(dashboard), assign_panel_ids(dashboard)) {
-        (Ok(()), Ok(ids)) => ids,
-        (validated, assigned) => {
-            let mut errors = validated.err().map(|errors| errors.0).unwrap_or_default();
-            errors.extend(assigned.err().unwrap_or_default());
-            return Err(ValidationErrors(errors));
-        }
-    };
-    let mut ids = ids.into_iter();
-    let mut next_id = || ids.next().unwrap_or_default();
+    let resolved = resolve(dashboard)?;
     let mut panels = Vec::new();
-    let mut current_y = 0;
-    let mut top_level_flow = FlowLayout::new(current_y);
 
-    for item in &dashboard.items {
+    for item in resolved.items() {
         match item {
-            DashboardItem::Panel(panel) => {
-                let grid = top_level_flow.place(panel);
-                let id = next_id();
-                panels.push(normalize_panel(
-                    panel,
-                    id,
-                    grid,
-                    dashboard.datasource.as_ref(),
-                ));
-                current_y = top_level_flow.bottom();
-            }
-            DashboardItem::Row(row) => {
-                current_y = top_level_flow.bottom().max(current_y);
-                let row_y = current_y;
-                let row_id = next_id();
-                let mut row_flow = FlowLayout::new(row_y.saturating_add(1));
-                let mut row_panels = Vec::with_capacity(row.panels.len());
-
-                for panel in &row.panels {
-                    let grid = row_flow.place(panel);
-                    let id = next_id();
-                    row_panels.push(normalize_panel(
-                        panel,
-                        id,
-                        grid,
-                        dashboard.datasource.as_ref(),
-                    ));
-                }
-
-                let row_bottom = row_flow.bottom();
-                if row.collapsed {
-                    panels.push(normalize_row(row, row_id, row_y, row_panels));
+            ResolvedItem::Panel(panel) => panels.push(normalize_panel(panel)),
+            ResolvedItem::Row(row) => {
+                let row_panels = row.panels().iter().map(normalize_panel);
+                // Grafana Classic nests a collapsed row's panels inside the row object and lists an expanded row's panels after it.
+                if row.collapsed() {
+                    panels.push(normalize_row(row, row_panels.collect()));
                 } else {
-                    panels.push(normalize_row(row, row_id, row_y, Vec::new()));
+                    panels.push(normalize_row(row, Vec::new()));
                     panels.extend(row_panels);
                 }
-
-                current_y = if row.collapsed {
-                    row_y.saturating_add(1)
-                } else {
-                    row_bottom.max(row_y.saturating_add(1))
-                };
-                top_level_flow = FlowLayout::new(current_y);
             }
         }
     }

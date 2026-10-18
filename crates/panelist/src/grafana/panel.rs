@@ -26,9 +26,10 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use crate::{
-    AxisPlacement, DataSource, GridPos, HeatmapColorMode, HeatmapColorScheme, Legend, LegendMode,
-    LegendPlacement, Panel, PanelKind, ReduceOptions, Repeat, Row, TextMode, Tooltip,
+    AxisPlacement, HeatmapColorMode, HeatmapColorScheme, Legend, LegendMode, LegendPlacement,
+    Panel, PanelKind, ReduceOptions, Repeat, TextMode, Tooltip,
     panel::PanelOptions,
+    resolved::{ResolvedPanel, ResolvedRow},
 };
 
 use super::field::normalize_field_config;
@@ -38,7 +39,7 @@ use super::vocabulary::{
     bar_gauge_display_mode, orientation, plugin_id, reducer, stat_color_mode, stat_graph_mode,
     text_mode, tooltip_mode, tooltip_sort,
 };
-use super::wire::{GrafanaGridPos, GrafanaPanel};
+use super::wire::GrafanaPanel;
 
 pub(crate) fn tooltip_value(tooltip: Tooltip) -> Value {
     json!({
@@ -60,18 +61,14 @@ pub(crate) fn reduce_options_value(options: &ReduceOptions) -> Value {
     })
 }
 
-pub(crate) fn normalize_row(row: &Row, id: u32, y: u16, panels: Vec<GrafanaPanel>) -> GrafanaPanel {
+pub(crate) fn normalize_row(resolved: &ResolvedRow<'_>, panels: Vec<GrafanaPanel>) -> GrafanaPanel {
+    let row = resolved.row;
     GrafanaPanel {
-        id,
+        id: resolved.id(),
         kind: "row".to_owned(),
         title: row.title.clone(),
         description: None,
-        grid_pos: GrafanaGridPos {
-            x: 0,
-            y,
-            w: 24,
-            h: 1,
-        },
+        grid_pos: resolved.grid_pos().into(),
         datasource: None,
         targets: Vec::new(),
         transformations: Vec::new(),
@@ -108,14 +105,8 @@ pub(crate) fn normalize_row(row: &Row, id: u32, y: u16, panels: Vec<GrafanaPanel
 ///
 /// `fieldConfig.defaults.custom` follows the same three-tier ordering
 /// through `super::field::normalize_field_config`.
-pub(crate) fn normalize_panel(
-    panel: &Panel,
-    id: u32,
-    grid: GridPos,
-    default_datasource: Option<&DataSource>,
-) -> GrafanaPanel {
-    let datasource = panel.datasource.as_ref().or(default_datasource).cloned();
-    let targets = normalize_targets(&panel.queries, datasource.as_ref());
+pub(crate) fn normalize_panel(resolved: &ResolvedPanel<'_>) -> GrafanaPanel {
+    let panel = resolved.panel;
     let mut options = default_panel_options(panel);
     options.extend(typed_panel_options(&panel.kind_options));
     options.extend(panel.raw_options.clone());
@@ -128,13 +119,13 @@ pub(crate) fn normalize_panel(
     };
 
     GrafanaPanel {
-        id,
+        id: resolved.id(),
         kind: plugin_id(&panel.kind).to_owned(),
         title: panel.title.clone(),
         description: panel.description.clone(),
-        grid_pos: grid.into(),
-        datasource,
-        targets,
+        grid_pos: resolved.grid_pos().into(),
+        datasource: resolved.datasource().cloned(),
+        targets: normalize_targets(resolved.queries()),
         transformations: panel
             .transformations
             .iter()
@@ -142,7 +133,7 @@ pub(crate) fn normalize_panel(
             .collect(),
         field_config: Some(normalize_field_config(
             &panel.field_config,
-            &panel.queries,
+            resolved.field_config().overrides(),
             &panel.kind,
             &panel.kind_options,
         )),

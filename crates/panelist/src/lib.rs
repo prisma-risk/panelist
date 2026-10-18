@@ -50,6 +50,8 @@
 //! assert!(json.contains("http_requests_total"));
 //! # Ok::<(), panelist::Error>(())
 //! ```
+//!
+//! [`Dashboard::resolve`] returns a read-only [`ResolvedDashboard`] with every panel ID, query reference ID, grid position, and inherited datasource filled in, so tests and lints can check dashboard invariants without parsing the JSON back.
 
 mod annotation;
 mod dashboard;
@@ -61,8 +63,10 @@ mod keyed_table;
 mod link;
 mod macros;
 mod panel;
+mod promql;
 mod query;
 pub mod render;
+mod resolved;
 mod table;
 mod target;
 mod transformation;
@@ -87,11 +91,16 @@ pub use panel::{
     BarGauge, Gauge, GridPos, Heatmap, HorizontalRepeat, Panel, PanelBuilder, PanelKind, RawPanel,
     Repeat, Stat, Table, Text, TextMode, Timeseries, VerticalRepeat,
 };
+pub use promql::{LegendFormatError, Matchers, RangeSelector, Selector, legend};
 pub use query::{
     LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, QueryType,
     RawQuery,
 };
 pub use render::DashboardSet;
+pub use resolved::{
+    PanelRow, ResolvedDashboard, ResolvedFieldConfig, ResolvedItem, ResolvedPanel, ResolvedQuery,
+    ResolvedRow, ResolvedThresholdStep, ResolvedThresholds,
+};
 pub use table::{
     CellBackgroundMode, CellValueDisplay, ColoredBackgroundCell, GaugeCell, SparklineCell,
     TableCell, TableCellType,
@@ -119,6 +128,7 @@ struct ReadmeDoctests;
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::promql::{check_legend, render_legend};
     pub use panelist_macros::dashboard;
     pub use serde_json;
 }
@@ -133,14 +143,15 @@ pub mod prelude {
         DataSourceVariable, FieldConfig, FieldOverride, Gauge, GaugeCell, GrafanaTarget, GridPos,
         Heatmap, HeatmapColorMode, HeatmapColorScheme, JoinByField, JoinMode, KeyedTable,
         LabelsToFields, LabelsToFieldsMode, Legend, LegendMode, LegendPlacement, LineInterpolation,
-        LokiQuery, OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel, PanelIds,
-        PanelKind, PointVisibility, PrometheusAnnotation, PrometheusFormat, PrometheusQuery, Query,
-        QueryEditorMode, QueryType, QueryVariable, RawAnnotation, RawPanel, RawQuery,
-        RawTransformation, ReduceOptions, Reducer, RenameByRegex, Repeat, Row, SortBy,
-        SortDirection, SparklineCell, SpecialValue, Stacking, StackingMode, Stat, StatColorMode,
-        StatGraphMode, Table, TableCell, TableCellType, Text, TextMode, ThresholdMode, Thresholds,
-        TimeRange, TimeSeriesToTable, Timeseries, Tooltip, TooltipMode, TooltipSort,
-        Transformation, Unit, ValueMapping, Variable, VariableBuilder, VariableRefresh,
-        VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus, promql,
+        LokiQuery, Matchers, OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel,
+        PanelIds, PanelKind, PointVisibility, PrometheusAnnotation, PrometheusFormat,
+        PrometheusQuery, Query, QueryEditorMode, QueryType, QueryVariable, RangeSelector,
+        RawAnnotation, RawPanel, RawQuery, RawTransformation, ReduceOptions, Reducer,
+        RenameByRegex, Repeat, Row, Selector, SortBy, SortDirection, SparklineCell, SpecialValue,
+        Stacking, StackingMode, Stat, StatColorMode, StatGraphMode, Table, TableCell,
+        TableCellType, Text, TextMode, ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable,
+        Timeseries, Tooltip, TooltipMode, TooltipSort, Transformation, Unit, ValueMapping,
+        Variable, VariableBuilder, VariableRefresh, VariableSelection, VariableSort, dashboard,
+        legend, loki, loki_query, prometheus, promql,
     };
 }
