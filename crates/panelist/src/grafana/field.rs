@@ -28,17 +28,22 @@ use serde_json::{Value, json};
 
 use crate::{
     CellBackgroundMode, CellValueDisplay, ColorScheme, FieldConfig, FieldOverride, OverrideMatcher,
-    OverrideProperty, PanelKind, Stacking, TableCell, ThresholdMode, Thresholds,
+    OverrideProperty, PanelKind, Query, Stacking, TableCell, ThresholdMode, Thresholds,
     panel::PanelOptions,
 };
 
-use super::vocabulary::{color, line_interpolation, point_visibility, stacking_mode, unit};
+use super::query::query_field_overrides;
+use super::vocabulary::{
+    color, continuous_palette, line_interpolation, point_visibility, stacking_mode, unit,
+};
 use super::wire::{
     GrafanaFieldConfig, GrafanaFieldOverride, GrafanaMatcher, GrafanaOverrideProperty,
 };
 
+/// Lowers a panel's field config. `queries` contribute their own field properties as overrides, emitted ahead of the panel's (see `super::query::query_field_overrides`).
 pub(crate) fn normalize_field_config(
     config: &FieldConfig,
+    queries: &[Query],
     kind: &PanelKind,
     kind_options: &PanelOptions,
 ) -> GrafanaFieldConfig {
@@ -88,7 +93,11 @@ pub(crate) fn normalize_field_config(
 
     GrafanaFieldConfig {
         defaults,
-        overrides: config.overrides.iter().map(normalize_override).collect(),
+        overrides: query_field_overrides(queries)
+            .iter()
+            .chain(&config.overrides)
+            .map(normalize_override)
+            .collect(),
     }
 }
 
@@ -286,34 +295,28 @@ pub(crate) fn stacking_value(stacking: &Stacking) -> Value {
     json!({"mode": stacking_mode(stacking.mode), "group": stacking.group})
 }
 
+// `fixed` and `shades` read their color from `fixedColor` (`getFixedColor` and `getShadedColor` in `packages/grafana-data/src/field/fieldColor.ts`); every other mode takes none.
 pub(crate) fn color_scheme_value(scheme: &ColorScheme) -> Value {
     match scheme {
         ColorScheme::Thresholds => json!({"mode": "thresholds"}),
         ColorScheme::ClassicPalette => json!({"mode": "palette-classic"}),
+        ColorScheme::ClassicPaletteByName => json!({"mode": "palette-classic-by-name"}),
         ColorScheme::Fixed(value) => json!({"mode": "fixed", "fixedColor": color(value)}),
-        ColorScheme::Continuous(scheme) => json!({"mode": scheme}),
+        ColorScheme::Shades(value) => json!({"mode": "shades", "fixedColor": color(value)}),
+        ColorScheme::Continuous(palette) => json!({"mode": continuous_palette(*palette)}),
     }
 }
 
+/// Grafana's step list: the base step, with a `null` value, then each authored step.
 pub(crate) fn thresholds_value(thresholds: &Thresholds) -> Value {
-    let mut steps = Vec::new();
-    if thresholds
-        .steps
-        .first()
-        .is_none_or(|step| step.value.is_some())
-    {
-        let step_color = thresholds
-            .steps
-            .first()
-            .map_or("green", |step| color(&step.color));
-        steps.push(json!({"color": step_color, "value": null}));
-    }
-    steps.extend(thresholds.steps.iter().map(|step| {
-        json!({
-            "color": color(&step.color),
-            "value": step.value,
-        })
-    }));
+    let steps = std::iter::once(json!({"color": color(&thresholds.base), "value": null}))
+        .chain(thresholds.steps.iter().map(|step| {
+            json!({
+                "color": color(&step.color),
+                "value": step.value,
+            })
+        }))
+        .collect::<Vec<_>>();
     json!({
         "mode": match thresholds.mode {
             ThresholdMode::Absolute => "absolute",

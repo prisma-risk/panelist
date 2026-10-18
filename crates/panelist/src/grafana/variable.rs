@@ -58,7 +58,7 @@ pub(crate) fn normalize_variable(
                 variable.hidden,
                 variable.skip_url_sync,
             );
-            let expression = variable.query.expression();
+            let expression = variable.query.expression().unwrap_or_default();
             let ref_id = variable
                 .query
                 .options()

@@ -390,6 +390,10 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.unit($crate::Unit::Custom(($unit).into()));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    ($panel:ident; unit: currency($currency:expr); $($rest:tt)*) => {
+        $panel = $panel.unit($crate::Unit::Currency($currency));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; unit: $unit:ident; $($rest:tt)*) => {
         $panel = $panel.unit($crate::__panelist_unit!($unit));
         $crate::__panelist_panel_items!($panel; $($rest)*);
@@ -422,8 +426,8 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.mode($crate::__panelist_text_mode!($mode));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
-    ($panel:ident; thresholds { $($body:tt)* } $($rest:tt)*) => {
-        let mut __panelist_thresholds = $crate::Thresholds::new();
+    ($panel:ident; thresholds($base:ident) { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_thresholds = $crate::Thresholds::absolute($crate::__panelist_color!($base));
         $crate::__panelist_threshold_items!(__panelist_thresholds; $($body)*);
         $panel = $panel.thresholds(__panelist_thresholds);
         $crate::__panelist_panel_items!($panel; $($rest)*);
@@ -614,8 +618,12 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.color($crate::ColorScheme::Fixed($crate::__panelist_color!($color)));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
-    ($panel:ident; color: continuous($scheme:expr); $($rest:tt)*) => {
-        $panel = $panel.color($crate::ColorScheme::Continuous(($scheme).into()));
+    ($panel:ident; color: shades($color:ident); $($rest:tt)*) => {
+        $panel = $panel.color($crate::ColorScheme::Shades($crate::__panelist_color!($color)));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color: continuous($palette:expr); $($rest:tt)*) => {
+        $panel = $panel.color($crate::ColorScheme::Continuous($palette));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
     ($panel:ident; color: thresholds; $($rest:tt)*) => {
@@ -624,6 +632,10 @@ macro_rules! __panelist_panel_items {
     };
     ($panel:ident; color: classic_palette; $($rest:tt)*) => {
         $panel = $panel.color($crate::ColorScheme::ClassicPalette);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; color: by_name; $($rest:tt)*) => {
+        $panel = $panel.color($crate::ColorScheme::ClassicPaletteByName);
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
     ($panel:ident; color_mode: scheme; $($rest:tt)*) => {
@@ -921,12 +933,8 @@ macro_rules! __panelist_query_items {
         $query = $query.ref_id($ref_id);
         $crate::__panelist_query_items!($query; $($rest)*);
     };
-    ($query:ident; instant: $instant:expr; $($rest:tt)*) => {
-        $query = $query.instant($instant);
-        $crate::__panelist_query_items!($query; $($rest)*);
-    };
-    ($query:ident; range: $range:expr; $($rest:tt)*) => {
-        $query = $query.range($range);
+    ($query:ident; query_type: $query_type:ident; $($rest:tt)*) => {
+        $query = $query.query_type($crate::__panelist_query_type!($query_type));
         $crate::__panelist_query_items!($query; $($rest)*);
     };
     ($query:ident; datasource: $datasource:expr; $($rest:tt)*) => {
@@ -959,16 +967,8 @@ macro_rules! __panelist_query_items {
 #[macro_export]
 macro_rules! __panelist_threshold_items {
     ($thresholds:ident;) => {};
-    ($thresholds:ident; green: $value:expr; $($rest:tt)*) => {
-        $thresholds = $thresholds.green($value);
-        $crate::__panelist_threshold_items!($thresholds; $($rest)*);
-    };
-    ($thresholds:ident; yellow: $value:expr; $($rest:tt)*) => {
-        $thresholds = $thresholds.yellow($value);
-        $crate::__panelist_threshold_items!($thresholds; $($rest)*);
-    };
-    ($thresholds:ident; red: $value:expr; $($rest:tt)*) => {
-        $thresholds = $thresholds.red($value);
+    ($thresholds:ident; $color:ident: $value:expr; $($rest:tt)*) => {
+        $thresholds = $thresholds.step($value, $crate::__panelist_color!($color));
         $crate::__panelist_threshold_items!($thresholds; $($rest)*);
     };
 }
@@ -1131,6 +1131,10 @@ macro_rules! __panelist_override_items {
         $field = $field.unit($crate::Unit::Custom(($unit).into()));
         $crate::__panelist_override_items!($field; $($rest)*);
     };
+    ($field:ident; unit: currency($currency:expr); $($rest:tt)*) => {
+        $field = $field.unit($crate::Unit::Currency($currency));
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
     ($field:ident; unit: $unit:ident; $($rest:tt)*) => {
         $field = $field.unit($crate::__panelist_unit!($unit));
         $crate::__panelist_override_items!($field; $($rest)*);
@@ -1151,8 +1155,8 @@ macro_rules! __panelist_override_items {
         $field = $field.display_name($name);
         $crate::__panelist_override_items!($field; $($rest)*);
     };
-    ($field:ident; thresholds { $($body:tt)* } $($rest:tt)*) => {
-        let mut __panelist_thresholds = $crate::Thresholds::new();
+    ($field:ident; thresholds($base:ident) { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_thresholds = $crate::Thresholds::absolute($crate::__panelist_color!($base));
         $crate::__panelist_threshold_items!(__panelist_thresholds; $($body)*);
         $field = $field.thresholds(__panelist_thresholds);
         $crate::__panelist_override_items!($field; $($rest)*);
@@ -1251,9 +1255,62 @@ macro_rules! __panelist_variable_items {
 
 #[doc(hidden)]
 #[macro_export]
+macro_rules! __panelist_query_type {
+    (range) => {
+        $crate::QueryType::Range
+    };
+    (instant) => {
+        $crate::QueryType::Instant
+    };
+    (both) => {
+        $crate::QueryType::Both
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __panelist_unit {
+    (nanoseconds) => {
+        $crate::Unit::Nanoseconds
+    };
+    (microseconds) => {
+        $crate::Unit::Microseconds
+    };
     (seconds) => {
         $crate::Unit::Seconds
+    };
+    (minutes) => {
+        $crate::Unit::Minutes
+    };
+    (hours) => {
+        $crate::Unit::Hours
+    };
+    (days) => {
+        $crate::Unit::Days
+    };
+    (duration_seconds) => {
+        $crate::Unit::DurationSeconds
+    };
+    (duration_milliseconds) => {
+        $crate::Unit::DurationMilliseconds
+    };
+    (bits_per_second) => {
+        $crate::Unit::BitsPerSecond
+    };
+    (packets_per_second) => {
+        $crate::Unit::PacketsPerSecond
+    };
+    (reads_per_second) => {
+        $crate::Unit::ReadsPerSecond
+    };
+    (writes_per_second) => {
+        $crate::Unit::WritesPerSecond
+    };
+    (iops) => {
+        $crate::Unit::IoOperationsPerSecond
+    };
+    (events_per_second) => {
+        $crate::Unit::EventsPerSecond
     };
     (milliseconds) => {
         $crate::Unit::Milliseconds

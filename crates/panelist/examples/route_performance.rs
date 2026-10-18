@@ -53,7 +53,7 @@ fn main() -> panelist::Result<()> {
                 unit: percent_unit;
                 width: 6;
 
-                thresholds {
+                thresholds(green) {
                     green: 0.0;
                     yellow: 0.01;
                     red: 0.05;
@@ -92,7 +92,7 @@ fn main() -> panelist::Result<()> {
             bar_gauge "Top routes by traffic" {
                 query: promql!("topk(10, sum by (route) (rate(http_requests_total[$__rate_interval])))") {
                     legend_format: "{{route}}";
-                    instant: true;
+                    query_type: instant;
                 }
                 unit: reqps;
                 width: 12;
@@ -104,37 +104,37 @@ fn main() -> panelist::Result<()> {
                 query: promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))") {
                     ref_id: "A";
                     format: table;
-                    instant: true;
+                    query_type: instant;
                 }
                 query: promql!("sum by (route) (rate(http_requests_total{status=~\"4..\"}[$__rate_interval]))") {
                     ref_id: "B";
                     format: table;
-                    instant: true;
+                    query_type: instant;
                 }
                 query: promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))") {
                     ref_id: "C";
                     format: table;
-                    instant: true;
+                    query_type: instant;
                 }
                 query: promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum by (route) (rate(http_requests_total[$__rate_interval]))") {
                     ref_id: "D";
                     format: table;
-                    instant: true;
+                    query_type: instant;
                 }
                 query: promql!("histogram_quantile(0.50, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
                     ref_id: "E";
                     format: table;
-                    instant: true;
+                    query_type: instant;
                 }
                 query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
                     ref_id: "F";
                     format: table;
-                    instant: true;
+                    query_type: instant;
                 }
                 query: promql!("histogram_quantile(0.99, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
                     ref_id: "G";
                     format: table;
-                    instant: true;
+                    query_type: instant;
                 }
                 query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
                     ref_id: "H";
@@ -191,7 +191,7 @@ fn main() -> panelist::Result<()> {
                 override field("error %") {
                     unit: percent_unit;
                     cell: colored_background;
-                    thresholds {
+                    thresholds(green) {
                         green: 0.0;
                         yellow: 0.01;
                         red: 0.05;
@@ -205,7 +205,7 @@ fn main() -> panelist::Result<()> {
                 override field("p95") {
                     unit: seconds;
                     cell: colored_background;
-                    thresholds {
+                    thresholds(green) {
                         green: 0.0;
                         yellow: 0.3;
                         red: 1.0;
@@ -255,7 +255,7 @@ fn main() -> panelist::Result<()> {
                 unit: percent;
                 width: 12;
 
-                thresholds {
+                thresholds(red) {
                     red: 0.0;
                     yellow: 20.0;
                     green: 50.0;

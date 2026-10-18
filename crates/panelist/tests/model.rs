@@ -127,7 +127,11 @@ fn serializes_units_thresholds_legends_and_overrides() {
     let panel = Timeseries::new("Latency")
         .query(PrometheusQuery::new("latency").legend_format("p99"))
         .unit(Unit::Milliseconds)
-        .thresholds(Thresholds::new().green(0.0).yellow(250.0).red(500.0))
+        .thresholds(
+            Thresholds::absolute(Color::Green)
+                .step(250.0, Color::Yellow)
+                .step(500.0, Color::Red),
+        )
         .legend_options(
             Legend::new()
                 .mode(LegendMode::Table)
@@ -280,7 +284,7 @@ fn serializes_value_mappings_and_threshold_overrides() {
         .mapping(ValueMapping::new("1", "Healthy").color(Color::Green))
         .override_field(
             FieldOverride::by_name("availability")
-                .thresholds(Thresholds::new().step(Color::Red, None).green(1.0)),
+                .thresholds(Thresholds::absolute(Color::Red).step(1.0, Color::Green)),
         );
     let value = as_value(&Dashboard::new("Mappings").panel(panel));
     let panel = &value["panels"][0];
@@ -365,7 +369,11 @@ fn rejects_invalid_dimensions_duplicate_ids_refs_and_thresholds() {
                 .id(7)
                 .query(PrometheusQuery::new("foo").ref_id("A"))
                 .query(PrometheusQuery::new("bar").ref_id("A"))
-                .thresholds(Thresholds::new().red(5.0).green(1.0)),
+                .thresholds(
+                    Thresholds::absolute(Color::Green)
+                        .step(5.0, Color::Red)
+                        .step(1.0, Color::Green),
+                ),
         )
         .panel(Stat::new("Duplicate").id(7));
     let errors = dashboard.validate().unwrap_err();
@@ -1239,11 +1247,11 @@ fn a_misspelt_builtin_in_a_typed_query_is_reported() {
 fn raw_queries_tolerate_plugin_macros_but_not_unknown_variables() {
     let dashboard = Dashboard::new("SQL").variable(environment()).panel(
         Table::new("Rows")
-            .query(RawQuery::new(
+            .query(RawQuery::new().expression(
                 "SELECT $__timeGroup(ts, $__interval), count(*) FROM t WHERE $__timeFilter(ts) AND $__unixEpochFilter(epoch) AND env = '$env' GROUP BY 1",
             ))
-            .query(RawQuery::new("SELECT mean(v) FROM m WHERE $timeFilter GROUP BY time($interval)"))
-            .query(RawQuery::new("SELECT * FROM t WHERE region = '$region'")),
+            .query(RawQuery::new().expression("SELECT mean(v) FROM m WHERE $timeFilter GROUP BY time($interval)"))
+            .query(RawQuery::new().expression("SELECT * FROM t WHERE region = '$region'")),
     );
 
     assert_eq!(unknown_names(&dashboard), ["region"]);
@@ -1392,4 +1400,194 @@ fn dollar_signs_that_are_not_references_are_ignored() {
         );
 
     dashboard.validate().unwrap();
+}
+
+fn validation_errors(dashboard: &Dashboard) -> Vec<ValidationError> {
+    match dashboard.validate() {
+        Ok(()) => Vec::new(),
+        Err(errors) => errors.errors().to_vec(),
+    }
+}
+
+#[test]
+fn instant_is_shorthand_for_the_instant_query_type() {
+    assert_eq!(
+        PrometheusQuery::new("up").instant(),
+        PrometheusQuery::new("up").query_type(QueryType::Instant)
+    );
+    assert_eq!(
+        LokiQuery::new("{job=\"api\"}").instant(),
+        LokiQuery::new("{job=\"api\"}").query_type(QueryType::Instant)
+    );
+}
+
+#[test]
+fn loki_rejects_the_combined_query_type_and_prometheus_accepts_it() {
+    let dashboard = Dashboard::new("Query types").panel(
+        Timeseries::new("Mixed evaluations")
+            .query(PrometheusQuery::new("up").query_type(QueryType::Both))
+            .query(LokiQuery::new("{job=\"api\"}").query_type(QueryType::Both)),
+    );
+    assert_eq!(
+        validation_errors(&dashboard),
+        [ValidationError::UnsupportedQueryType {
+            panel: "Mixed evaluations".to_owned(),
+            ref_id: "B".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn a_mixed_panel_requires_a_datasource_on_every_query() {
+    let panel = Timeseries::new("Requests and logs")
+        .query(PrometheusQuery::new("up").datasource(prometheus("metrics")))
+        .query(LokiQuery::new("{job=\"api\"}"));
+    let expected = [ValidationError::MissingMixedQueryDataSource {
+        panel: "Requests and logs".to_owned(),
+        ref_id: "B".to_owned(),
+    }];
+
+    let on_panel = Dashboard::new("Mixed").panel(panel.clone().datasource(DataSource::mixed()));
+    assert_eq!(validation_errors(&on_panel), expected);
+
+    let inherited = Dashboard::new("Mixed")
+        .datasource(DataSource::mixed())
+        .panel(panel);
+    assert_eq!(validation_errors(&inherited), expected);
+}
+
+#[test]
+fn mixed_is_the_builtin_datasource_reference() {
+    let mixed = DataSource::mixed();
+    assert_eq!(mixed.kind(), "datasource");
+    assert_eq!(mixed.uid(), "-- Mixed --");
+    assert!(mixed.is_mixed());
+    assert!(!prometheus("-- Mixed --").is_mixed());
+}
+
+#[test]
+fn a_raw_query_needs_an_expression_or_an_extra_key() {
+    let missing = |query: RawQuery| {
+        validation_errors(&Dashboard::new("Raw").panel(Timeseries::new("Raw").query(query)))
+            .iter()
+            .any(|error| matches!(error, ValidationError::MissingQueryExpression { .. }))
+    };
+
+    assert!(missing(RawQuery::new()));
+    assert!(missing(RawQuery::new().expression("  ")));
+    assert!(!missing(RawQuery::new().expression("up")));
+    assert!(!missing(
+        RawQuery::new().extra("metricName", json!("CPUUtilization"))
+    ));
+}
+
+#[test]
+fn a_variable_query_still_needs_an_expression() {
+    let dashboard = Dashboard::new("Variables").variable(QueryVariable::new(
+        "region",
+        RawQuery::new().extra("namespace", json!("AWS/EC2")),
+    ));
+    assert!(matches!(
+        validation_errors(&dashboard).as_slice(),
+        [ValidationError::MissingQueryExpression { panel }] if panel == "variable region"
+    ));
+}
+
+#[test]
+fn thresholds_are_validated_wherever_they_appear() {
+    let decreasing = Thresholds::absolute(Color::Green)
+        .step(5.0, Color::Red)
+        .step(1.0, Color::Yellow);
+    let non_finite = Thresholds::absolute(Color::Green).step(f64::NAN, Color::Red);
+
+    for panel in [
+        Stat::new("Panel")
+            .query(PrometheusQuery::new("up"))
+            .thresholds(decreasing.clone()),
+        Stat::new("Override")
+            .query(PrometheusQuery::new("up"))
+            .override_field(FieldOverride::by_name("up").thresholds(decreasing.clone())),
+        Stat::new("Query").query(PrometheusQuery::new("up").thresholds(non_finite.clone())),
+    ] {
+        let errors = validation_errors(&Dashboard::new("Thresholds").panel(panel));
+        assert!(
+            matches!(
+                errors.as_slice(),
+                [ValidationError::InvalidThresholds { .. }]
+            ),
+            "{errors:?}"
+        );
+    }
+
+    let valid = Dashboard::new("Thresholds").panel(
+        Stat::new("Base only")
+            .query(PrometheusQuery::new("up"))
+            .thresholds(Thresholds::percentage(Color::Red)),
+    );
+    assert!(validation_errors(&valid).is_empty());
+}
+
+/// Per-query overrides follow reference ID assignment: a query without an explicit ID gets the first letter no explicit ID already holds.
+#[test]
+fn query_field_properties_target_the_assigned_ref_id() {
+    let dashboard = Dashboard::new("Per query").panel(
+        Timeseries::new("Traffic")
+            .query(PrometheusQuery::new("first").unit(Unit::Seconds))
+            .query(PrometheusQuery::new("second").ref_id("A")),
+    );
+    let value = as_value(&dashboard);
+    let panel = &value["panels"][0];
+    assert_eq!(panel["targets"][0]["refId"], "B");
+    assert_eq!(
+        panel["fieldConfig"]["overrides"][0]["matcher"],
+        json!({"id": "byFrameRefID", "options": "B"})
+    );
+}
+
+#[test]
+fn duplicate_explicit_ref_ids_are_caught_with_query_field_properties() {
+    let dashboard = Dashboard::new("Duplicates").panel(
+        Timeseries::new("Traffic")
+            .query(
+                PrometheusQuery::new("first")
+                    .ref_id("A")
+                    .color(Color::Green),
+            )
+            .query(PrometheusQuery::new("second").ref_id("A").color(Color::Red)),
+    );
+    assert_eq!(
+        validation_errors(&dashboard),
+        [ValidationError::DuplicateQueryRefId {
+            panel: "Traffic".to_owned(),
+            ref_id: "A".to_owned(),
+        }]
+    );
+}
+
+/// Variables render no fields, so a variable query's field properties have nowhere to go and are left out rather than misplaced.
+#[test]
+fn field_properties_on_a_variable_query_are_not_emitted() {
+    let dashboard = Dashboard::new("Variables").variable(QueryVariable::new(
+        "job",
+        PrometheusQuery::new("label_values(up, job)").unit(Unit::Seconds),
+    ));
+    let variable = &as_value(&dashboard)["templating"]["list"][0];
+    assert_eq!(
+        variable["query"],
+        json!({"query": "label_values(up, job)", "refId": "StandardVariableQuery"})
+    );
+    assert!(variable.get("fieldConfig").is_none());
+}
+
+#[test]
+fn rename_by_regex_reports_an_unknown_ref_id_filter() {
+    let dashboard = Dashboard::new("Rename").panel(
+        Table::new("Services")
+            .query(PrometheusQuery::new("up"))
+            .transform(RenameByRegex::new("(.*)-api", "$1").only_ref_id("Z")),
+    );
+    assert!(matches!(
+        validation_errors(&dashboard).as_slice(),
+        [ValidationError::UnknownTransformationRefId { ref_id, .. }] if ref_id == "Z"
+    ));
 }

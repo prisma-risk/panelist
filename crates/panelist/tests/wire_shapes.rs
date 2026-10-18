@@ -862,41 +862,32 @@ fn the_transformation_envelope_is_omitted_unless_set() {
 // Field defaults
 // ---------------------------------------------------------------------------
 
-/// Grafana's base threshold step is the one with a `null` value, and it has
-/// to be there: without it the first real step has nothing below it. An
-/// authored set that already starts with a base step must not get a second
-/// one prepended.
+/// Grafana's base threshold step is the one with a `null` value, and it has to be there: without it the first real step has nothing below it. It is always the authored base color, emitted exactly once, followed by each step in order.
 #[test]
-fn thresholds_always_carry_exactly_one_base_step() {
-    let implicit = Dashboard::new("Thresholds").panel(
+fn thresholds_emit_the_base_color_as_the_one_null_step() {
+    let absolute = Dashboard::new("Thresholds").panel(
         Stat::new("Value")
             .query(PrometheusQuery::new("up"))
-            .thresholds(Thresholds::new().green(0.0).red(5.0)),
+            .thresholds(Thresholds::absolute(Color::Green).step(5.0, Color::Red)),
     );
     assert_eq!(
-        panel_of(&implicit)["fieldConfig"]["defaults"]["thresholds"],
+        panel_of(&absolute)["fieldConfig"]["defaults"]["thresholds"],
         json!({
             "mode": "absolute",
             "steps": [
                 {"color": "green", "value": null},
-                {"color": "green", "value": 0.0},
                 {"color": "red", "value": 5.0},
             ],
         })
     );
 
-    let explicit = Dashboard::new("Thresholds").panel(
+    let percentage = Dashboard::new("Thresholds").panel(
         Stat::new("Value")
             .query(PrometheusQuery::new("up"))
-            .thresholds(
-                Thresholds::new()
-                    .step(Color::Red, None)
-                    .green(1.0)
-                    .mode(ThresholdMode::Percentage),
-            ),
+            .thresholds(Thresholds::percentage(Color::Red).step(1.0, Color::Green)),
     );
     assert_eq!(
-        panel_of(&explicit)["fieldConfig"]["defaults"]["thresholds"],
+        panel_of(&percentage)["fieldConfig"]["defaults"]["thresholds"],
         json!({
             "mode": "percentage",
             "steps": [
@@ -905,8 +896,25 @@ fn thresholds_always_carry_exactly_one_base_step() {
             ],
         })
     );
+
+    let base_only = Dashboard::new("Thresholds").panel(
+        Stat::new("Value")
+            .query(PrometheusQuery::new("up"))
+            .thresholds(Thresholds::new(
+                ThresholdMode::Absolute,
+                Color::custom("#7EB26D"),
+            )),
+    );
+    assert_eq!(
+        panel_of(&base_only)["fieldConfig"]["defaults"]["thresholds"],
+        json!({
+            "mode": "absolute",
+            "steps": [{"color": "#7EB26D", "value": null}],
+        })
+    );
 }
 
+/// Every mode is a `FieldColorModeId` registered in `packages/grafana-data/src/field/fieldColor.ts`. Only `fixed` and `shades` read `fixedColor` (`getFixedColor`, `getShadedColor`).
 #[test]
 fn every_color_scheme_emits_its_grafana_shape() {
     for (scheme, expected) in [
@@ -916,11 +924,19 @@ fn every_color_scheme_emits_its_grafana_shape() {
             json!({"mode": "palette-classic"}),
         ),
         (
+            ColorScheme::ClassicPaletteByName,
+            json!({"mode": "palette-classic-by-name"}),
+        ),
+        (
             ColorScheme::Fixed(Color::Purple),
             json!({"mode": "fixed", "fixedColor": "purple"}),
         ),
         (
-            ColorScheme::Continuous("continuous-GrYlRd".to_owned()),
+            ColorScheme::Shades(Color::Blue),
+            json!({"mode": "shades", "fixedColor": "blue"}),
+        ),
+        (
+            ColorScheme::Continuous(ContinuousPalette::GreenYellowRed),
             json!({"mode": "continuous-GrYlRd"}),
         ),
     ] {
@@ -932,6 +948,130 @@ fn every_color_scheme_emits_its_grafana_shape() {
         assert_eq!(
             panel_of(&dashboard)["fieldConfig"]["defaults"]["color"],
             expected
+        );
+    }
+}
+
+/// `FieldColorModeId` in `packages/grafana-data/src/types/fieldColor.ts`. Case matters: the two-hue palettes are camel-cased, the single-hue ones lower-cased.
+#[test]
+fn every_continuous_palette_emits_its_grafana_mode() {
+    for (palette, mode) in [
+        (ContinuousPalette::GreenYellowRed, "continuous-GrYlRd"),
+        (ContinuousPalette::RedYellowGreen, "continuous-RdYlGr"),
+        (ContinuousPalette::BlueYellowRed, "continuous-BlYlRd"),
+        (ContinuousPalette::YellowRed, "continuous-YlRd"),
+        (ContinuousPalette::BluePurple, "continuous-BlPu"),
+        (ContinuousPalette::YellowBlue, "continuous-YlBl"),
+        (ContinuousPalette::Blues, "continuous-blues"),
+        (ContinuousPalette::Reds, "continuous-reds"),
+        (ContinuousPalette::Greens, "continuous-greens"),
+        (ContinuousPalette::Purples, "continuous-purples"),
+        (ContinuousPalette::Viridis, "continuous-viridis"),
+        (ContinuousPalette::Magma, "continuous-magma"),
+        (ContinuousPalette::Plasma, "continuous-plasma"),
+        (ContinuousPalette::Inferno, "continuous-inferno"),
+        (ContinuousPalette::Cividis, "continuous-cividis"),
+    ] {
+        let dashboard = Dashboard::new("Colors").panel(
+            Gauge::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .color(ColorScheme::Continuous(palette)),
+        );
+        assert_eq!(
+            panel_of(&dashboard)["fieldConfig"]["defaults"]["color"],
+            json!({"mode": mode}),
+            "{palette:?}"
+        );
+    }
+}
+
+/// Unit IDs from `packages/grafana-data/src/valueFormats/categories.ts`. Grafana renders an unknown ID as a literal suffix, so a wrong one shows up as text such as `5 hrs` rather than as an error.
+#[test]
+fn every_typed_unit_emits_its_grafana_unit_id() {
+    for (unit, id) in [
+        (Unit::None, "none"),
+        (Unit::Nanoseconds, "ns"),
+        (Unit::Microseconds, "\u{b5}s"),
+        (Unit::Milliseconds, "ms"),
+        (Unit::Seconds, "s"),
+        (Unit::Minutes, "m"),
+        (Unit::Hours, "h"),
+        (Unit::Days, "d"),
+        (Unit::DurationSeconds, "dtdurations"),
+        (Unit::DurationMilliseconds, "dtdurationms"),
+        (Unit::Bytes, "bytes"),
+        (Unit::BytesPerSecond, "Bps"),
+        (Unit::BitsPerSecond, "bps"),
+        (Unit::PacketsPerSecond, "pps"),
+        (Unit::Percent, "percent"),
+        (Unit::PercentUnit, "percentunit"),
+        (Unit::RequestsPerSecond, "reqps"),
+        (Unit::OperationsPerSecond, "ops"),
+        (Unit::ReadsPerSecond, "rps"),
+        (Unit::WritesPerSecond, "wps"),
+        (Unit::IoOperationsPerSecond, "iops"),
+        (Unit::EventsPerSecond, "eps"),
+        (Unit::Short, "short"),
+        (Unit::Currency(Currency::Usd), "currencyUSD"),
+        (Unit::custom("widgets"), "widgets"),
+    ] {
+        let dashboard = Dashboard::new("Units").panel(
+            Stat::new("Value")
+                .query(PrometheusQuery::new("up"))
+                .unit(unit.clone()),
+        );
+        assert_eq!(
+            panel_of(&dashboard)["fieldConfig"]["defaults"]["unit"],
+            json!(id),
+            "{unit:?}"
+        );
+    }
+}
+
+/// The whole currency category of `categories.ts`, in its own order. The micro-bitcoin ID uses U+03BC GREEK SMALL LETTER MU, unlike the U+00B5 MICRO SIGN in the `µs` time unit.
+#[test]
+fn every_currency_emits_its_grafana_unit_id() {
+    for (currency, id) in [
+        (Currency::Usd, "currencyUSD"),
+        (Currency::Gbp, "currencyGBP"),
+        (Currency::Eur, "currencyEUR"),
+        (Currency::Jpy, "currencyJPY"),
+        (Currency::Rub, "currencyRUB"),
+        (Currency::Uah, "currencyUAH"),
+        (Currency::Brl, "currencyBRL"),
+        (Currency::Dkk, "currencyDKK"),
+        (Currency::Isk, "currencyISK"),
+        (Currency::Nok, "currencyNOK"),
+        (Currency::Sek, "currencySEK"),
+        (Currency::Czk, "currencyCZK"),
+        (Currency::Chf, "currencyCHF"),
+        (Currency::Pln, "currencyPLN"),
+        (Currency::Btc, "currencyBTC"),
+        (Currency::MilliBtc, "currencymBTC"),
+        (Currency::MicroBtc, "currency\u{3bc}BTC"),
+        (Currency::Zar, "currencyZAR"),
+        (Currency::Inr, "currencyINR"),
+        (Currency::Krw, "currencyKRW"),
+        (Currency::Idr, "currencyIDR"),
+        (Currency::Php, "currencyPHP"),
+        (Currency::Vnd, "currencyVND"),
+        (Currency::Try, "currencyTRY"),
+        (Currency::Myr, "currencyMYR"),
+        (Currency::Xpf, "currencyXPF"),
+        (Currency::Bgn, "currencyBGN"),
+        (Currency::Pyg, "currencyPYG"),
+        (Currency::Uyu, "currencyUYU"),
+        (Currency::Ils, "currencyILS"),
+    ] {
+        let dashboard = Dashboard::new("Currencies").panel(
+            Stat::new("Value")
+                .query(PrometheusQuery::new("revenue"))
+                .unit(currency.into()),
+        );
+        assert_eq!(
+            panel_of(&dashboard)["fieldConfig"]["defaults"]["unit"],
+            json!(id),
+            "{currency:?}"
         );
     }
 }
@@ -963,7 +1103,7 @@ fn every_override_property_emits_its_grafana_field_property_id() {
                     .display_name("p95 latency")
                     .color(Color::Red)
                     .line_width(2)
-                    .thresholds(Thresholds::new().green(0.0))
+                    .thresholds(Thresholds::absolute(Color::Green))
                     .cell(GaugeCell::new().mode(BarGaugeDisplayMode::Basic)),
             ),
     );
@@ -982,10 +1122,7 @@ fn every_override_property_emits_its_grafana_field_property_id() {
                 "id": "thresholds",
                 "value": {
                     "mode": "absolute",
-                    "steps": [
-                        {"color": "green", "value": null},
-                        {"color": "green", "value": 0.0},
-                    ],
+                    "steps": [{"color": "green", "value": null}],
                 }
             },
             {"id": "custom.cellOptions", "value": {"type": "gauge", "mode": "basic"}},
@@ -1017,7 +1154,7 @@ fn a_fully_specified_query_target_is_exact() {
                 .legend_format("{{status}}")
                 .format(PrometheusFormat::Table)
                 .editor_mode(QueryEditorMode::Code)
-                .instant(true)
+                .instant()
                 .hidden(true)
                 .interval("30s"),
         ),
@@ -1036,5 +1173,185 @@ fn a_fully_specified_query_target_is_exact() {
             "hide": true,
             "interval": "30s",
         })
+    );
+}
+
+/// The `instant`/`range` keys a Prometheus-style target carries for each evaluation. Unset leaves both out, so Grafana's own default applies.
+#[test]
+fn each_query_type_emits_its_instant_and_range_keys() {
+    for (query_type, expected) in [
+        (None, json!({"refId": "A", "expr": "up", "hide": false})),
+        (
+            Some(QueryType::Range),
+            json!({"refId": "A", "expr": "up", "range": true, "hide": false}),
+        ),
+        (
+            Some(QueryType::Instant),
+            json!({"refId": "A", "expr": "up", "instant": true, "range": false, "hide": false}),
+        ),
+        (
+            Some(QueryType::Both),
+            json!({"refId": "A", "expr": "up", "instant": true, "range": true, "hide": false}),
+        ),
+    ] {
+        let mut query = PrometheusQuery::new("up");
+        if let Some(query_type) = query_type {
+            query = query.query_type(query_type);
+        }
+        let dashboard = Dashboard::new("Targets").panel(Stat::new("Value").query(query));
+        assert_eq!(
+            panel_of(&dashboard)["targets"][0],
+            expected,
+            "{query_type:?}"
+        );
+    }
+}
+
+/// Loki reads `queryType` (`LokiQueryType` in `public/app/plugins/datasource/loki/dataquery.gen.ts`) and always gets one, `range` when nothing else was asked for.
+#[test]
+fn loki_targets_carry_query_type() {
+    let dashboard = Dashboard::new("Logs").panel(
+        Table::new("Errors")
+            .query(LokiQuery::new("{job=\"api\"}"))
+            .query(LokiQuery::new("{job=\"api\"}").instant()),
+    );
+    let targets = &panel_of(&dashboard)["targets"];
+    assert_eq!(
+        targets[0],
+        json!({"refId": "A", "expr": "{job=\"api\"}", "hide": false, "queryType": "range"})
+    );
+    assert_eq!(
+        targets[1],
+        json!({
+            "refId": "B",
+            "expr": "{job=\"api\"}",
+            "instant": true,
+            "range": false,
+            "hide": false,
+            "queryType": "instant",
+        })
+    );
+}
+
+/// A raw target carries only what was set. CloudWatch, for one, has no `expr` key at all, and a stray empty one is noise in its query editor.
+#[test]
+fn a_raw_target_without_an_expression_has_no_expr_key() {
+    let dashboard = Dashboard::new("Raw").panel(
+        Timeseries::new("CPU").query(
+            RawQuery::new()
+                .datasource(DataSource::new("cloudwatch", "cloudwatch-main"))
+                .extra("namespace", json!("AWS/EC2"))
+                .extra("metricName", json!("CPUUtilization")),
+        ),
+    );
+    assert_eq!(
+        panel_of(&dashboard)["targets"][0],
+        json!({
+            "refId": "A",
+            "datasource": {"type": "cloudwatch", "uid": "cloudwatch-main"},
+            "hide": false,
+            "metricName": "CPUUtilization",
+            "namespace": "AWS/EC2",
+        })
+    );
+
+    let with_expression = Dashboard::new("Raw").panel(
+        Timeseries::new("Up").query(
+            RawQuery::new()
+                .expression("up")
+                .extra("exemplar", json!(true)),
+        ),
+    );
+    assert_eq!(
+        panel_of(&with_expression)["targets"][0],
+        json!({"refId": "A", "expr": "up", "hide": false, "exemplar": true})
+    );
+}
+
+/// Built-in datasources are served with the plugin type `datasource` and their name as UID (`pkg/api/frontendsettings.go`, `public/app/features/plugins/datasource_srv.ts`). Each target keeps its own datasource; validation rejects one that would inherit the mixed ref.
+#[test]
+fn a_mixed_panel_emits_the_builtin_ref_and_targets_keep_their_own() {
+    let dashboard = Dashboard::new("Mixed").panel(
+        Timeseries::new("Requests and errors")
+            .datasource(DataSource::mixed())
+            .query(PrometheusQuery::new("up").datasource(prometheus("metrics")))
+            .query(LokiQuery::new("{job=\"api\"}").datasource(loki("logs"))),
+    );
+    let panel = panel_of(&dashboard);
+    assert_eq!(
+        panel["datasource"],
+        json!({"type": "datasource", "uid": "-- Mixed --"})
+    );
+    assert_eq!(
+        panel["targets"][0]["datasource"],
+        json!({"type": "prometheus", "uid": "metrics"})
+    );
+    assert_eq!(
+        panel["targets"][1]["datasource"],
+        json!({"type": "loki", "uid": "logs"})
+    );
+}
+
+/// `RenameByRegexTransformerOptions` in `packages/grafana-data/src/transformations/transformers/renameByRegex.ts`.
+#[test]
+fn rename_by_regex_emits_regex_and_rename_pattern() {
+    let dashboard = Dashboard::new("Rename").panel(
+        Table::new("Services")
+            .query(PrometheusQuery::new("up").ref_id("A"))
+            .transform(RenameByRegex::new("(.*)-api", "$1").only_ref_id("A")),
+    );
+    assert_eq!(
+        first_transformation(&dashboard),
+        json!({
+            "id": "renameByRegex",
+            "options": {"regex": "(.*)-api", "renamePattern": "$1"},
+            "filter": {"id": "byRefId", "options": "A"},
+        })
+    );
+}
+
+/// A query's own field properties become one `byFrameRefID` override on its resolved reference ID, explicit or assigned. Query overrides come first, in query order, then the panel's, so the panel can refine them.
+#[test]
+fn query_field_properties_become_leading_by_frame_ref_id_overrides() {
+    let dashboard = Dashboard::new("Per query").panel(
+        Timeseries::new("Traffic")
+            .query(
+                PrometheusQuery::new("sum(rate(http_requests_total[$__rate_interval]))")
+                    .unit(Unit::RequestsPerSecond)
+                    .color(Color::Green),
+            )
+            .query(PrometheusQuery::new("plain"))
+            .query(
+                PrometheusQuery::new(
+                    "sum(rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))",
+                )
+                .ref_id("errors")
+                .color(Color::Red)
+                .display_name("Errors"),
+            )
+            .override_field(FieldOverride::by_name("Errors").line_width(3)),
+    );
+    assert_eq!(
+        panel_of(&dashboard)["fieldConfig"]["overrides"],
+        json!([
+            {
+                "matcher": {"id": "byFrameRefID", "options": "A"},
+                "properties": [
+                    {"id": "unit", "value": "reqps"},
+                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}},
+                ],
+            },
+            {
+                "matcher": {"id": "byFrameRefID", "options": "errors"},
+                "properties": [
+                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}},
+                    {"id": "displayName", "value": "Errors"},
+                ],
+            },
+            {
+                "matcher": {"id": "byName", "options": "Errors"},
+                "properties": [{"id": "custom.lineWidth", "value": 3}],
+            },
+        ])
     );
 }

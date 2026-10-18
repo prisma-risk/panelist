@@ -209,6 +209,38 @@ vocabulary on each — `value`/`background`/`none` versus `scheme`/`opacity`.
 The two sets are disjoint, so the right one is selected by what you write, and
 pairing a panel kind with the wrong vocabulary is a compile error.
 
+Thresholds always name their base color first: it applies below the first step. Field colors, units, and query evaluation are typed too:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "Checkout";
+    datasource: prometheus("prometheus-main");
+
+    stat "Revenue today" {
+        query: promql!("sum(increase(checkout_revenue_total[1d]))") {
+            query_type: instant;
+        }
+        unit: currency(Currency::Usd);
+
+        thresholds(red) {
+            yellow: 10000.0;
+            green: 50000.0;
+        }
+    }
+
+    timeseries "Requests by instance" {
+        query: promql!("sum by (instance) (rate(http_requests_total{job=\"checkout\"}[$__rate_interval]))");
+        unit: reqps;
+        color: by_name;
+    }
+};
+# let _ = dashboard;
+```
+
+`color: by_name` keys each series' color on its name, so `$instance` values keep their colors when instances come and go. The positional `classic_palette` shifts every later series to a new color whenever one appears or disappears; keep it for a small, fixed set of series. `fixed(..)`, `shades(..)`, `thresholds`, and `continuous(ContinuousPalette::..)` cover the other Grafana color modes.
+
 Table panels can transform, sort, and style their columns without leaving
 the DSL:
 
@@ -224,7 +256,7 @@ let dashboard = dashboard! {
             query: promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))") {
                 ref_id: "A";
                 format: table;
-                instant: true;
+                query_type: instant;
             }
             width: 24;
 
@@ -246,9 +278,7 @@ let dashboard = dashboard! {
 
 Table configuration stays typed throughout:
 
-- Transformations: `join_by_field`, `sort_by`, `organize`,
-  `time_series_to_table`, and `labels_to_fields`. Scope any of them to one
-  query with `only ref_id(..)`.
+- Transformations: `join_by_field`, `sort_by`, `organize`, `time_series_to_table`, and `labels_to_fields`, plus `RenameByRegex` through `transform: RenameByRegex::new(..);`. Scope any of them to one query with `only ref_id(..)`, or `.only_ref_id(..)` on the builder.
 - Field matchers: `field(name)`, `regex(pattern)`, `type(field_type)`,
   `query(ref_id)`, `names([..])`, `numeric`, and `time`.
 - Cell renderers: `auto`, `colored_text`, `colored_background`, `gauge`, and
@@ -311,21 +341,71 @@ let dashboard = Dashboard::new("HTTP")
 # let _ = dashboard;
 ```
 
+A query can carry its own field properties, so styling one query's series needs no hand-picked reference ID. Panelist emits them as a field override on the reference ID the query resolves to, ahead of the panel's own overrides, so a panel-level override can still refine one series:
+
+```rust
+use panelist::prelude::*;
+
+let panel = Timeseries::new("Requests and errors")
+    .query(
+        PrometheusQuery::new("sum(rate(http_requests_total[$__rate_interval]))")
+            .legend_format("requests")
+            .color(Color::Green),
+    )
+    .query(
+        PrometheusQuery::new("sum(rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))")
+            .legend_format("errors")
+            .color(Color::Red),
+    )
+    .unit(Unit::RequestsPerSecond)
+    .thresholds(Thresholds::absolute(Color::Green).step(100.0, Color::Red));
+# let _ = panel;
+```
+
+One panel can query several datasources through Grafana's mixed datasource. Each query then names its own, and validation reports one that does not:
+
+```rust
+use panelist::prelude::*;
+
+let panel = Timeseries::new("Requests and error logs")
+    .datasource(DataSource::mixed())
+    .query(
+        PrometheusQuery::new("sum(rate(http_requests_total[$__rate_interval]))")
+            .datasource(prometheus("prometheus-main")),
+    )
+    .query(
+        LokiQuery::new("sum(count_over_time({job=\"api\"} |= \"error\" [$__interval]))")
+            .datasource(loki("loki-main")),
+    );
+# let _ = panel;
+```
+
 The typed API covers:
 
 - dashboards, rows, datasources, time ranges, links, and persisted variable
   state;
-- Prometheus and Loki queries, including time-series, table, and heatmap
-  result formats;
+- Prometheus and Loki queries, including range, instant, and combined evaluations, time-series, table, and heatmap result formats, per-query field properties, and the mixed datasource;
 - datasource, query, custom, and constant variables;
-- field defaults, value mappings, thresholds, legends, overrides, and field
-  matchers;
+- field defaults, units including every Grafana currency, value mappings, thresholds, color schemes, legends, overrides, and field matchers;
 - transformations, table cells and sorting, heatmaps, and the common options
   for stat, time-series, gauge, and bar-gauge panels.
 
 When Grafana supports something Panelist does not model yet, use `RawQuery`,
 `RawPanel`, `RawTransformation`, or the ordered `extra`, `option`, and `custom`
 methods.
+
+A `RawQuery` emits only the keys you set. `RawQuery::new().expression(..)` writes `expr` for Prometheus-compatible datasources, and a datasource without expressions, such as CloudWatch, takes its whole query from `.extra(..)`:
+
+```rust
+use panelist::prelude::*;
+use serde_json::json;
+
+let query = RawQuery::new()
+    .datasource(DataSource::new("cloudwatch", "cloudwatch-main"))
+    .extra("namespace", json!("AWS/EC2"))
+    .extra("metricName", json!("CPUUtilization"));
+# let _ = query;
+```
 
 Real-world provisioning metadata and visualization choices remain typed:
 
@@ -426,6 +506,8 @@ or expressions, invalid widths and positions, zero heights, and malformed
 threshold ordering. Invalid authored dashboards return errors instead of
 panicking.
 
+It also catches query setups Grafana would run differently from how they read: a query on a mixed panel without a datasource of its own, and a Loki query that asks for a combined range-and-instant evaluation Loki cannot run.
+
 ### Variable references
 
 Validation also checks that every template variable a dashboard references is declared. Grafana leaves an unresolved reference in place, so a typo like `$enviroment` reaches the datasource verbatim and the panel just shows no data. Panelist reports it as `ValidationError::UnknownVariableReference`, naming the dashboard, panel or variable, the field, and the name.
@@ -494,9 +576,7 @@ screenshots from that stack, so an image cannot drift from its example.
   check itself already exists and round-trips both golden dashboards
   cleanly today, it just isn't triggered on every push yet.
 - Add an opt-in Grafana V2 resource serializer and dynamic layouts.
-- Add annotations, range/regex value mappings, and data links; add more
-  transformation types beyond the five modeled today (join, sort, organize,
-  time-series-to-table, labels-to-fields).
+- Add annotations, range/regex value mappings, and data links; add more transformation types beyond the six modeled today (join, sort, organize, time-series-to-table, labels-to-fields, rename-by-regex).
 - Add more datasource query types without turning the core crate into an API
   client.
 - Stabilize the API from real-world dashboard authoring feedback.
