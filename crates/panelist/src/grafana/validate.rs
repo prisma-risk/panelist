@@ -294,6 +294,7 @@ pub(crate) fn validate_panel(
     if panel.title.trim().is_empty() {
         errors.push(ValidationError::MissingPanelTitle);
     }
+    errors.extend(panel.diagnostics.iter().cloned());
     if !(1..=24).contains(&panel.width) {
         errors.push(ValidationError::InvalidPanelWidth {
             panel: panel.title.clone(),

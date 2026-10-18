@@ -258,6 +258,39 @@ Set a default renderer with `cell: <type>;` on the table, or set one inside an
 `override` for selected fields. For transformations Panelist does not model,
 `transform: <expr>;` accepts a `RawTransformation` or `Transformation` value.
 
+The most common multi-query table, one row per label value and one column per query, has its own builder. `keyed` turns a configured table into a `KeyedTable`, and each `Column` names its header once:
+
+```rust
+use panelist::prelude::*;
+
+let routes = Table::new("Route performance")
+    .width(24)
+    .sort_by("p95", SortDirection::Descending)
+    .keyed("route")
+    .key_name("Route")
+    .column(
+        Column::new("RPS", promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))"))
+            .unit(Unit::RequestsPerSecond),
+    )
+    .column(
+        Column::new("p95", promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
+            .unit(Unit::Seconds)
+            .cell(TableCellType::ColoredBackground)
+            .thresholds(Thresholds::new().green(0.0).yellow(0.3).red(1.0)),
+    )
+    .column(
+        Column::trend("Trend", promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))"), Reducer::Last)
+            .cell(SparklineCell::new().hide_value(true)),
+    );
+
+let dashboard = Dashboard::new("Routes")
+    .datasource(prometheus("prometheus-main"))
+    .row(Row::new("Routes").panel(routes));
+# let _ = dashboard;
+```
+
+It lowers into the ordinary table you would otherwise write by hand: instant `format: table` queries for value columns and a range query for each trend, reference IDs, a time-series-to-table step for the trends, an outer join on the key, an organize step that renames Grafana's `Value #<refId>` and `Trend #<refId>` fields to the column names and orders them, and one override per column. Anything set on the table before `keyed` comes after the lowering, so extra overrides win and extra transformations see the column names. The join is Grafana's plain outer join: the tabular outer join expands into one row per key per query on Grafana 11.5. A key is one label, because Grafana joins on one field; build a combined label with PromQL's `label_join` to key on several. The `dashboard!` macro has no keyed-table syntax yet, so add a keyed table to a row with `panels: [..];`.
+
 Heatmap panels configure their color scale and Y axis directly:
 
 ```rust
@@ -320,8 +353,7 @@ The typed API covers:
 - datasource, query, custom, and constant variables;
 - field defaults, value mappings, thresholds, legends, overrides, and field
   matchers;
-- transformations, table cells and sorting, heatmaps, and the common options
-  for stat, time-series, gauge, and bar-gauge panels.
+- transformations, keyed multi-query tables, table cells and sorting, heatmaps, and the common options for stat, time-series, gauge, and bar-gauge panels.
 
 When Grafana supports something Panelist does not model yet, use `RawQuery`,
 `RawPanel`, `RawTransformation`, or the ordered `extra`, `option`, and `custom`
@@ -566,10 +598,7 @@ cargo run -p panelist --example basic
   reusable Rust fragment
 - [`full_dashboard.rs`](crates/panelist/examples/full_dashboard.rs) — realistic
   GeoIP dashboard using Prometheus and Loki
-- [`route_performance.rs`](crates/panelist/examples/route_performance.rs) —
-  operational dashboard exercising panel transformations, typed table cells
-  and sorting, Prometheus result formats, and heatmap options, with zero
-  escape hatches
+- [`route_performance.rs`](crates/panelist/examples/route_performance.rs) — operational dashboard exercising a keyed multi-query table, typed table cells and sorting, Prometheus result formats, and heatmap options, with zero escape hatches
 
 [The gallery](examples/README.md) shows what each one looks like once Grafana
 has rendered it. `make demo` boots Prometheus, Loki, and Grafana in Docker,

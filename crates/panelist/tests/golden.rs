@@ -223,126 +223,47 @@ fn route_performance_dashboard() -> Dashboard {
         }
 
         row "Routes" {
-            table "Route performance" {
-                query: promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))") {
-                    ref_id: "A";
-                    format: table;
-                    instant: true;
-                }
-                query: promql!("sum by (route) (rate(http_requests_total{status=~\"4..\"}[$__rate_interval]))") {
-                    ref_id: "B";
-                    format: table;
-                    instant: true;
-                }
-                query: promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))") {
-                    ref_id: "C";
-                    format: table;
-                    instant: true;
-                }
-                query: promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum by (route) (rate(http_requests_total[$__rate_interval]))") {
-                    ref_id: "D";
-                    format: table;
-                    instant: true;
-                }
-                query: promql!("histogram_quantile(0.50, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
-                    ref_id: "E";
-                    format: table;
-                    instant: true;
-                }
-                query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
-                    ref_id: "F";
-                    format: table;
-                    instant: true;
-                }
-                query: promql!("histogram_quantile(0.99, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
-                    ref_id: "G";
-                    format: table;
-                    instant: true;
-                }
-                query: promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
-                    ref_id: "H";
-                    format: time_series;
-                }
-                width: 24;
-
-                transform time_series_to_table {
-                    query "H": last;
-                }
-                transform join_by_field("route", outer_tabular);
-                transform organize {
-                    rename "Value #A" => "RPS";
-                    rename "Value #B" => "4xx rate";
-                    rename "Value #C" => "5xx rate";
-                    rename "Value #D" => "error %";
-                    rename "Value #E" => "p50";
-                    rename "Value #F" => "p95";
-                    rename "Value #G" => "p99";
-                    // The `Value #<refId>` names on A-G come from the
-                    // Prometheus datasource's own response transform, which
-                    // renames each query's `Value` field to `Value #<refId>`
-                    // whenever a panel has more than one `format: table`
-                    // query — before any panel transformation runs.
-                    // `timeSeriesTable`, by contrast, is a panel transform
-                    // that names its synthesized trend field `Trend #<refId>`
-                    // directly at creation; it never produces a plain
-                    // `Value` field, so it never goes through that
-                    // datasource-side renaming. Renaming from `Value #H`
-                    // here would be a silent no-op, so this one differs from
-                    // the other seven on purpose — do not "fix" it back to
-                    // match them.
-                    rename "Trend #H" => "Trend";
-                    // The joined frame carries seven separate `Time` fields,
-                    // one per `format: table` query above — `excludeByName`
-                    // matches by name, so this one entry hides all of them.
-                    hide "Time";
-                    order ["route", "RPS", "4xx rate", "5xx rate", "error %", "p50", "p95", "p99", "Trend"];
-                }
-                sort_by: ("p95", desc);
-
-                override field("RPS") {
-                    unit: reqps;
-                }
-
-                override field("4xx rate") {
-                    unit: reqps;
-                }
-
-                override field("5xx rate") {
-                    unit: reqps;
-                }
-
-                override field("error %") {
-                    unit: percent_unit;
-                    cell: colored_background;
-                    thresholds {
-                        green: 0.0;
-                        yellow: 0.01;
-                        red: 0.05;
-                    }
-                }
-
-                override field("p50") {
-                    unit: seconds;
-                }
-
-                override field("p95") {
-                    unit: seconds;
-                    cell: colored_background;
-                    thresholds {
-                        green: 0.0;
-                        yellow: 0.3;
-                        red: 1.0;
-                    }
-                }
-
-                override field("p99") {
-                    unit: seconds;
-                }
-
-                override field("Trend") {
-                    cell: sparkline { hide_value: true; line_width: 2.0; };
-                }
-            }
+            // One row per route, one column per query. The keyed table owns the reference IDs, the join, Grafana's `Value #<refId>` and `Trend #<refId>` field names, the column order, and one override per column, so each column name is written once. The macro has no keyed-table syntax yet, so the table is built with the typed builder and added through `panels:`.
+            panels: [Table::new("Route performance")
+                .width(24)
+                .sort_by("p95", SortDirection::Descending)
+                .keyed("route")
+                .column(
+                    Column::new("RPS", promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))"))
+                        .unit(Unit::RequestsPerSecond),
+                )
+                .column(
+                    Column::new("4xx rate", promql!("sum by (route) (rate(http_requests_total{status=~\"4..\"}[$__rate_interval]))"))
+                        .unit(Unit::RequestsPerSecond),
+                )
+                .column(
+                    Column::new("5xx rate", promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))"))
+                        .unit(Unit::RequestsPerSecond),
+                )
+                .column(
+                    Column::new("error %", promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum by (route) (rate(http_requests_total[$__rate_interval]))"))
+                        .unit(Unit::PercentUnit)
+                        .cell(TableCellType::ColoredBackground)
+                        .thresholds(Thresholds::new().green(0.0).yellow(0.01).red(0.05)),
+                )
+                .column(
+                    Column::new("p50", promql!("histogram_quantile(0.50, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
+                        .unit(Unit::Seconds),
+                )
+                .column(
+                    Column::new("p95", promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
+                        .unit(Unit::Seconds)
+                        .cell(TableCellType::ColoredBackground)
+                        .thresholds(Thresholds::new().green(0.0).yellow(0.3).red(1.0)),
+                )
+                .column(
+                    Column::new("p99", promql!("histogram_quantile(0.99, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
+                        .unit(Unit::Seconds),
+                )
+                .column(
+                    Column::trend("Trend", promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"), Reducer::Last)
+                        .cell(SparklineCell::new().hide_value(true).line_width(2.0)),
+                )];
         }
 
         row "Latency" {

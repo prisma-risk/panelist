@@ -56,6 +56,7 @@ mod datasource;
 mod field;
 mod grafana;
 mod heatmap;
+mod keyed_table;
 mod macros;
 mod panel;
 mod promql;
@@ -78,6 +79,7 @@ pub use field::{
     ValueMapping,
 };
 pub use heatmap::{HeatmapColorMode, HeatmapColorScheme};
+pub use keyed_table::{Column, KeyedTable};
 pub use panel::{
     BarGauge, Gauge, GridPos, Heatmap, Panel, PanelBuilder, PanelKind, RawPanel, Stat, Table, Text,
     TextMode, Timeseries,
@@ -117,12 +119,12 @@ pub mod __private {
 pub mod prelude {
     pub use crate::{
         AxisPlacement, BarGauge, BarGaugeDisplayMode, CellBackgroundMode, CellValueDisplay, Color,
-        ColorScheme, ColoredBackgroundCell, ConstantVariable, CustomVariable, Dashboard,
+        ColorScheme, ColoredBackgroundCell, Column, ConstantVariable, CustomVariable, Dashboard,
         DashboardCursorSync, DashboardLink, DataSource, DataSourceVariable, FieldConfig,
         FieldOverride, Gauge, GaugeCell, GrafanaTarget, GridPos, Heatmap, HeatmapColorMode,
-        HeatmapColorScheme, JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, Legend,
-        LegendMode, LegendPlacement, LineInterpolation, LokiQuery, Matchers, OrganizeFields,
-        Orientation, OverrideMatcher, OverrideProperty, Panel, PanelIds, PanelKind,
+        HeatmapColorScheme, JoinByField, JoinMode, KeyedTable, LabelsToFields, LabelsToFieldsMode,
+        Legend, LegendMode, LegendPlacement, LineInterpolation, LokiQuery, Matchers,
+        OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel, PanelIds, PanelKind,
         PointVisibility, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryVariable,
         RangeSelector, RawPanel, RawQuery, RawTransformation, ReduceOptions, Reducer, Row,
         Selector, SortBy, SortDirection, SparklineCell, Stacking, StackingMode, Stat,
