@@ -39,6 +39,7 @@ mod variable;
 mod vocabulary;
 mod wire;
 
+pub(crate) use query::effective_ref_ids;
 pub(crate) use wire::NormalizedDashboard;
 
 use layout::{FlowLayout, assign_panel_ids};

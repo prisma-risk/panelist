@@ -57,6 +57,7 @@ mod datasource;
 mod field;
 mod grafana;
 mod heatmap;
+mod keyed_table;
 mod link;
 mod macros;
 mod panel;
@@ -80,6 +81,7 @@ pub use field::{
     Unit, ValueMapping,
 };
 pub use heatmap::{HeatmapColorMode, HeatmapColorScheme};
+pub use keyed_table::{Column, KeyedTable};
 pub use link::{DataLink, DataLinkVariable};
 pub use panel::{
     BarGauge, Gauge, GridPos, Heatmap, HorizontalRepeat, Panel, PanelBuilder, PanelKind, RawPanel,
@@ -118,11 +120,11 @@ pub mod __private {
 pub mod prelude {
     pub use crate::{
         Annotation, AxisPlacement, BarGauge, BarGaugeDisplayMode, BuiltInAnnotation,
-        CellBackgroundMode, CellValueDisplay, Color, ColorScheme, ColoredBackgroundCell,
+        CellBackgroundMode, CellValueDisplay, Color, ColorScheme, ColoredBackgroundCell, Column,
         ConstantVariable, CustomVariable, Dashboard, DashboardCursorSync, DashboardLink, DataLink,
         DataLinkVariable, DataSource, DataSourceVariable, FieldConfig, FieldOverride, Gauge,
         GaugeCell, GrafanaTarget, GridPos, Heatmap, HeatmapColorMode, HeatmapColorScheme,
-        JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, Legend, LegendMode,
+        JoinByField, JoinMode, KeyedTable, LabelsToFields, LabelsToFieldsMode, Legend, LegendMode,
         LegendPlacement, LineInterpolation, LokiQuery, OrganizeFields, Orientation,
         OverrideMatcher, OverrideProperty, Panel, PanelIds, PanelKind, PointVisibility,
         PrometheusAnnotation, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode,

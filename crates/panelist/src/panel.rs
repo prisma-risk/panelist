@@ -29,7 +29,7 @@ use crate::{
     AxisPlacement, BarGaugeDisplayMode, ColorScheme, DataLink, DataSource, FieldConfig,
     FieldOverride, HeatmapColorMode, HeatmapColorScheme, Legend, LineInterpolation, Orientation,
     PointVisibility, Query, ReduceOptions, SortDirection, Stacking, StatColorMode, StatGraphMode,
-    TableCell, Thresholds, Tooltip, Transformation, Unit, ValueMapping,
+    TableCell, Thresholds, Tooltip, Transformation, Unit, ValidationError, ValueMapping,
     heatmap::HeatmapOptions,
     table::{TableOptions, TableSort},
     visualization::{BarGaugeOptions, GaugeOptions, StatOptions, TimeseriesOptions},
@@ -234,6 +234,8 @@ pub struct Panel {
     pub(crate) kind_options: PanelOptions,
     pub(crate) raw_options: BTreeMap<String, Value>,
     pub(crate) extra: BTreeMap<String, Value>,
+    /// Problems a builder found while lowering into this panel, reported by validation because builders themselves cannot fail.
+    pub(crate) diagnostics: Vec<ValidationError>,
 }
 
 impl Panel {
@@ -259,6 +261,7 @@ impl Panel {
             kind_options: PanelOptions::None,
             raw_options: BTreeMap::new(),
             extra: BTreeMap::new(),
+            diagnostics: Vec::new(),
         }
     }
 

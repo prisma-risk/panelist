@@ -107,12 +107,6 @@ and Loki set on the one panel that needs it.
 [Source](../crates/panelist/examples/route_performance.rs) ·
 `cargo run -p panelist --example route_performance`
 
-The dashboard that gates Panelist's typed-transformation work, and the
-densest of the six. It chains three transformations on a single table panel
-(`timeSeriesTable` into `joinByField` into `organize`), renders cells with
-typed colored-background and sparkline renderers, sorts by a named column,
-uses all three Prometheus result formats across its queries, and draws a
-latency heatmap. It reaches for no raw Grafana JSON anywhere, which a test
-enforces.
+The dashboard that gates Panelist's typed-transformation work, and the densest of the six. Its route table is a keyed table: eight PromQL queries joined on the `route` label, which Panelist lowers into three chained transformations (`timeSeriesTable` into `joinByField` into `organize`) and one override per column. It renders cells with typed colored-background and sparkline renderers, sorts by a named column, uses all three Prometheus result formats across its queries, and draws a latency heatmap. It reaches for no raw Grafana JSON anywhere, which a test enforces.
 
 ![route_performance](images/route_performance.png)
