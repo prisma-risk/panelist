@@ -63,6 +63,7 @@ mod keyed_table;
 mod link;
 mod macros;
 mod panel;
+mod promql;
 mod query;
 pub mod render;
 mod resolved;
@@ -90,6 +91,7 @@ pub use panel::{
     BarGauge, Gauge, GridPos, Heatmap, HorizontalRepeat, Panel, PanelBuilder, PanelKind, RawPanel,
     Repeat, Stat, Table, Text, TextMode, Timeseries, VerticalRepeat,
 };
+pub use promql::{LegendFormatError, Matchers, RangeSelector, Selector, legend};
 pub use query::{
     LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, QueryType,
     RawQuery,
@@ -121,6 +123,7 @@ pub use visualization::{
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::promql::{check_legend, render_legend};
     pub use serde_json;
 }
 
@@ -134,14 +137,15 @@ pub mod prelude {
         DataSourceVariable, FieldConfig, FieldOverride, Gauge, GaugeCell, GrafanaTarget, GridPos,
         Heatmap, HeatmapColorMode, HeatmapColorScheme, JoinByField, JoinMode, KeyedTable,
         LabelsToFields, LabelsToFieldsMode, Legend, LegendMode, LegendPlacement, LineInterpolation,
-        LokiQuery, OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel, PanelIds,
-        PanelKind, PointVisibility, PrometheusAnnotation, PrometheusFormat, PrometheusQuery, Query,
-        QueryEditorMode, QueryType, QueryVariable, RawAnnotation, RawPanel, RawQuery,
-        RawTransformation, ReduceOptions, Reducer, RenameByRegex, Repeat, Row, SortBy,
-        SortDirection, SparklineCell, SpecialValue, Stacking, StackingMode, Stat, StatColorMode,
-        StatGraphMode, Table, TableCell, TableCellType, Text, TextMode, ThresholdMode, Thresholds,
-        TimeRange, TimeSeriesToTable, Timeseries, Tooltip, TooltipMode, TooltipSort,
-        Transformation, Unit, ValueMapping, Variable, VariableBuilder, VariableRefresh,
-        VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus, promql,
+        LokiQuery, Matchers, OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel,
+        PanelIds, PanelKind, PointVisibility, PrometheusAnnotation, PrometheusFormat,
+        PrometheusQuery, Query, QueryEditorMode, QueryType, QueryVariable, RangeSelector,
+        RawAnnotation, RawPanel, RawQuery, RawTransformation, ReduceOptions, Reducer,
+        RenameByRegex, Repeat, Row, Selector, SortBy, SortDirection, SparklineCell, SpecialValue,
+        Stacking, StackingMode, Stat, StatColorMode, StatGraphMode, Table, TableCell,
+        TableCellType, Text, TextMode, ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable,
+        Timeseries, Tooltip, TooltipMode, TooltipSort, Transformation, Unit, ValueMapping,
+        Variable, VariableBuilder, VariableRefresh, VariableSelection, VariableSort, dashboard,
+        legend, loki, loki_query, prometheus, promql,
     };
 }
