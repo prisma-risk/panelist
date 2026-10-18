@@ -426,6 +426,25 @@ or expressions, invalid widths and positions, zero heights, and malformed
 threshold ordering. Invalid authored dashboards return errors instead of
 panicking.
 
+### Variable references
+
+Validation also checks that every template variable a dashboard references is declared. Grafana leaves an unresolved reference in place, so a typo like `$enviroment` reaches the datasource verbatim and the panel just shows no data. Panelist reports it as `ValidationError::UnknownVariableReference`, naming the dashboard, panel or variable, the field, and the name.
+
+These fields are scanned:
+
+- query expressions and legend formats
+- datasource UIDs on the dashboard, panels, queries and query variables, such as `prometheus("$datasource")`
+- dashboard and panel link URLs
+- query variable definitions
+
+All of Grafana's syntaxes are recognised: `$name`, `${name}`, `${name:format}`, `${name.path}`, `[[name]]` and `[[name:format]]`. Matching follows Grafana's own pattern, so `$env_name` is one variable called `env_name`, not `$env` followed by `_name`. Write `${env}_name` for the latter.
+
+Grafana's global variables need no declaration: `$__rate_interval`, `$__interval`, `$__interval_ms`, `$__range`, `$__range_s`, `$__range_ms`, `$__rate_interval_ms`, `$__from`, `$__to`, `$__timeFilter`, `$timeFilter`, `$__timezone`, `$__dashboard`, `$__name`, `$__org`, `$__user`, `$__url_time_range`, `$__all_variables`, `$__all`, `$__auto` and `$__searchFilter`. Dotted forms like `${__user.login}` resolve through their base name. A misspelt built-in in a Prometheus or Loki query is still an error. A `RawQuery` targets a plugin Panelist does not know, so it also accepts any name in Grafana's reserved `__` namespace, such as the SQL macros `$__timeGroup` and `$__unixEpochFilter`, plus InfluxQL's legacy `$interval`.
+
+Grafana resolves variables in declaration order. A chained query variable may only reference variables declared before it, in its query or its datasource. A query variable that inherits the dashboard datasource needs that datasource's variable declared first too. Breaking the order is a `ValidationError::VariableReferencedBeforeDeclaration`. Panels resolve after every variable, so order does not matter to them.
+
+Some `$` signs are not references and never trip the check. Variable `regex` options are not scanned, so anchors like `/^(prod|staging)$/` are fine. Capture references like `$1` and `${1}` in `label_replace` are ignored, because no variable can have an all-digit name. A `$` followed by no name, as in `"^api$"`, starts no reference.
+
 ## Grafana compatibility
 
 Panelist emits Grafana Classic dashboard JSON with schema version 41. Classic
