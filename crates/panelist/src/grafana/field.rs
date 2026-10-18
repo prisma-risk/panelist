@@ -28,10 +28,11 @@ use serde_json::{Value, json};
 
 use crate::{
     CellBackgroundMode, CellValueDisplay, ColorScheme, FieldConfig, FieldOverride, OverrideMatcher,
-    OverrideProperty, PanelKind, Query, Stacking, TableCell, ThresholdMode, Thresholds,
-    panel::PanelOptions,
+    OverrideProperty, PanelKind, Query, SpecialValue, Stacking, TableCell, ThresholdMode,
+    Thresholds, ValueMapping, field::ValueMatch, panel::PanelOptions,
 };
 
+use super::link::data_links_value;
 use super::query::query_field_overrides;
 use super::vocabulary::{
     color, continuous_palette, line_interpolation, point_visibility, stacking_mode, unit,
@@ -66,22 +67,10 @@ pub(crate) fn normalize_field_config(
         defaults.insert("thresholds".to_owned(), thresholds_value(thresholds));
     }
     if !config.mappings.is_empty() {
-        let options = config
-            .mappings
-            .iter()
-            .map(|mapping| {
-                let mut result = serde_json::Map::new();
-                result.insert("text".to_owned(), json!(mapping.text));
-                if let Some(mapping_color) = &mapping.color {
-                    result.insert("color".to_owned(), json!(color(mapping_color)));
-                }
-                (mapping.value.clone(), Value::Object(result))
-            })
-            .collect::<serde_json::Map<_, _>>();
-        defaults.insert(
-            "mappings".to_owned(),
-            json!([{"type": "value", "options": options}]),
-        );
+        defaults.insert("mappings".to_owned(), mappings_value(&config.mappings));
+    }
+    if !config.links.is_empty() {
+        defaults.insert("links".to_owned(), data_links_value(&config.links));
     }
 
     let mut custom = default_field_custom(kind);
@@ -262,6 +251,14 @@ pub(crate) fn normalize_override(field_override: &FieldOverride) -> GrafanaField
                     id: "custom.cellOptions".to_owned(),
                     value: cell_options_value(cell),
                 },
+                OverrideProperty::Mappings(mappings) => GrafanaOverrideProperty {
+                    id: "mappings".to_owned(),
+                    value: mappings_value(mappings),
+                },
+                OverrideProperty::Links(links) => GrafanaOverrideProperty {
+                    id: "links".to_owned(),
+                    value: data_links_value(links),
+                },
                 OverrideProperty::Custom { id, value } => GrafanaOverrideProperty {
                     id: id.clone(),
                     value: value.clone(),
@@ -289,6 +286,69 @@ pub(crate) fn insert_number(map: &mut BTreeMap<String, Value>, key: &str, number
     if let Some(value) = number.and_then(serde_json::Number::from_f64) {
         map.insert(key.to_owned(), Value::Number(value));
     }
+}
+
+/// Lowers value mappings exactly as Grafana's mapping editor saves them.
+///
+/// `editModelToSaveModel` in `public/app/features/dimensions/editors/ValueMappingsEditor/ValueMappingsEditorModal.tsx` (Grafana v13.0.2) folds every exact-value row into one `value` entry placed first, appends the other kinds in row order, stamps each result with its row `index`, and drops blank text. Matching that shape means re-saving the dashboard from Grafana's editor leaves the mappings as Panelist wrote them, and the editor shows the rows in authored order: `buildEditRowModels` sorts by `index`, and with no index its comparator never reports two rows equal, so the order it shows is unspecified.
+///
+/// Every `options` and `result` shape below is the matching interface in `packages/grafana-data/src/types/valueMapping.ts` at the same tag.
+pub(crate) fn mappings_value(mappings: &[ValueMapping]) -> Value {
+    let mut exact = serde_json::Map::new();
+    let mut others = Vec::new();
+    for (index, mapping) in mappings.iter().enumerate() {
+        let mut result = serde_json::Map::new();
+        if let Some(text) = mapping.text.as_ref().filter(|text| !text.trim().is_empty()) {
+            result.insert("text".to_owned(), json!(text));
+        }
+        if let Some(mapping_color) = &mapping.color {
+            result.insert("color".to_owned(), json!(color(mapping_color)));
+        }
+        result.insert("index".to_owned(), json!(index));
+        let result = Value::Object(result);
+
+        match &mapping.matcher {
+            ValueMatch::Value(value) => {
+                exact.insert(value.clone(), result);
+            }
+            ValueMatch::Range { from, to } => others.push(json!({
+                "type": "range",
+                "options": {"from": number_or_null(*from), "to": number_or_null(*to), "result": result},
+            })),
+            ValueMatch::Regex(pattern) => others.push(json!({
+                "type": "regex",
+                "options": {"pattern": pattern, "result": result},
+            })),
+            ValueMatch::Special(value) => others.push(json!({
+                "type": "special",
+                "options": {"match": special_value(*value), "result": result},
+            })),
+        }
+    }
+
+    let mut output = Vec::with_capacity(others.len() + 1);
+    if !exact.is_empty() {
+        output.push(json!({"type": "value", "options": exact}));
+    }
+    output.extend(others);
+    Value::Array(output)
+}
+
+const fn special_value(value: SpecialValue) -> &'static str {
+    match value {
+        SpecialValue::Null => "null",
+        SpecialValue::NaN => "nan",
+        SpecialValue::NullOrNaN => "null+nan",
+        SpecialValue::True => "true",
+        SpecialValue::False => "false",
+        SpecialValue::Empty => "empty",
+    }
+}
+
+fn number_or_null(number: Option<f64>) -> Value {
+    number
+        .and_then(serde_json::Number::from_f64)
+        .map_or(Value::Null, Value::Number)
 }
 
 pub(crate) fn stacking_value(stacking: &Stacking) -> Value {

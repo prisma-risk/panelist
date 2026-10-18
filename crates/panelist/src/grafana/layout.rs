@@ -280,13 +280,14 @@ impl FlowLayout {
             return explicit;
         }
 
-        if self.x > 0 && self.x.saturating_add(panel.width) > 24 {
+        let width = panel.layout_width();
+        if self.x > 0 && self.x.saturating_add(width) > 24 {
             self.y = self.y.saturating_add(self.line_height);
             self.x = 0;
             self.line_height = 0;
         }
-        let grid = GridPos::new(self.x, self.y, panel.width, panel.height);
-        self.x = self.x.saturating_add(panel.width);
+        let grid = GridPos::new(self.x, self.y, width, panel.height);
+        self.x = self.x.saturating_add(width);
         self.line_height = self.line_height.max(panel.height);
         self.max_bottom = self.max_bottom.max(self.y.saturating_add(self.line_height));
         if self.x == 24 {

@@ -352,6 +352,48 @@ let dashboard = dashboard! {
 # let _ = dashboard;
 ```
 
+Repeats, time overrides, value mappings, data links, and annotations are one line each:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "API";
+    datasource: prometheus("prometheus-main");
+
+    variable "instance" {
+        query: promql!("label_values(up{job=\"api\"}, instance)");
+        multi: true;
+    }
+
+    annotation "Restarts" => "changes(process_start_time_seconds{job=\"api\"}[2m]) > 0" {
+        text_format: "{{instance}} restarted";
+        icon_color: orange;
+    }
+
+    stat "Up on $instance" {
+        query: promql!("up{instance=\"$instance\"}");
+        repeat: horizontal("instance", 4);
+        time_from: "1h";
+        min_interval: "30s";
+
+        mapping "1" => "Up" { color: green; }
+        mapping range(0.0, 0.5) => "Degraded" { color: yellow; }
+        mapping special(null) => "No data";
+
+        link "Runbook" => "https://runbook.example/api";
+        data_link "Logs" => "/explore?instance=${__field.labels.instance}" {
+            keep_time: true;
+        }
+    }
+};
+# let _ = dashboard;
+```
+
+Grafana expands a repeat when the dashboard loads, so Panelist lays out the authored panel once. A horizontal repeat always spans the full row, because Grafana stretches it to 24 columns and splits that row between the clones, `max_per_row` at a time (4 by default). A vertical repeat keeps the panel's width. `Row::repeat` repeats a whole row. Repeating by a variable the dashboard does not declare is a validation error.
+
+Value mappings come in Grafana's four kinds: exact `value`, numeric `range`, `regex`, and `special` (null, NaN, null or NaN, true, false, empty). Panelist emits them the way Grafana's mapping editor saves them, so exact values take precedence over the other kinds. `link` adds a link to the panel header and `data_link` adds one to the field values; both are Grafana data links, and `DataLinkVariable` spells the built-in `${__value.raw}`-style variables. `annotation` adds a typed Prometheus annotation query, and `RawAnnotation` covers other datasources.
+
 ## Builder API
 
 Every important DSL construct has a normal Rust equivalent for IDE discovery,
@@ -419,7 +461,9 @@ The typed API covers:
   state;
 - Prometheus and Loki queries, including range, instant, and combined evaluations, time-series, table, and heatmap result formats, per-query field properties, and the mixed datasource;
 - datasource, query, custom, and constant variables;
-- field defaults, units including every Grafana currency, value mappings, thresholds, color schemes, legends, overrides, and field matchers;
+- field defaults, units including every Grafana currency, value, range, regex, and special value mappings, field data links, thresholds, color schemes, legends, overrides, and field matchers;
+- panel repeats, row repeats, query options, and relative time overrides;
+- Prometheus annotation queries and Grafana's built-in annotation entry;
 - transformations, keyed multi-query tables, table cells and sorting, heatmaps, and the common options for stat, time-series, gauge, and bar-gauge panels.
 
 When Grafana supports something Panelist does not model yet, use `RawQuery`,
@@ -559,6 +603,10 @@ dashboard.write_json("dashboard.json")?;
 
 Validation reports duplicate explicit panel IDs and query refs, stable panel ID collisions, dashboard UIDs Grafana would refuse, missing titles or expressions, invalid widths and positions, zero heights, and malformed threshold ordering. Invalid authored dashboards return errors instead of panicking.
 
+It also rejects repeats by undeclared variables, malformed minimum intervals and time overrides, value mappings that can never match or change nothing, duplicate exact-value mappings, and annotations without a name or expression.
+
+It also catches query setups Grafana would run differently from how they read: a query on a mixed panel without a datasource of its own, and a Loki query that asks for a combined range-and-instant evaluation Loki cannot run.
+
 ## Rendering a directory
 
 Dashboards as code usually means committing the generated JSON, so reviewers see the wire diff and Grafana can provision the files. `DashboardSet` writes a set of dashboards into a directory and checks that directory in CI:
@@ -590,9 +638,6 @@ fn main() -> ExitCode {
 ```
 
 Each dashboard becomes `<uid>.json`: validated, pretty-printed JSON with a trailing newline. A dashboard without a UID, or two dashboards sharing one (ignoring case, for case-insensitive filesystems), is an error. `check_dir` never writes; it fails with a report listing every stale file, every missing file, and every orphaned `.json` file that no dashboard renders to anymore. `write_dir` removes the orphans, rewrites only files whose contents changed, and replaces each file atomically. Other files in the directory are left alone.
-
-
-It also catches query setups Grafana would run differently from how they read: a query on a mixed panel without a datasource of its own, and a Loki query that asks for a combined range-and-instant evaluation Loki cannot run.
 
 ### Variable references
 
@@ -668,7 +713,7 @@ screenshots from that stack, so an image cannot drift from its example.
 - Wire `scripts/verify-grafana.sh` (`make verify-grafana`) into CI so every change is validated against a live Grafana for every target automatically. The check already round-trips every golden through Grafana 11.5.2 and 13.0.2 cleanly; it just isn't triggered on every push yet.
 - Add targets for the Grafana releases in between (11.6 through 12.1 use `schemaVersion` 41) once each has a verified golden round trip.
 - Add an opt-in Grafana V2 resource serializer and dynamic layouts.
-- Add annotations, range/regex value mappings, and data links; add more transformation types beyond the six modeled today (join, sort, organize, time-series-to-table, labels-to-fields, rename-by-regex).
+- Add more transformation types beyond the six modeled today (join, sort, organize, time-series-to-table, labels-to-fields, rename-by-regex).
 - Add more datasource query types without turning the core crate into an API
   client.
 - Stabilize the API from real-world dashboard authoring feedback.

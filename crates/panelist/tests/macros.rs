@@ -855,7 +855,7 @@ fn panel_option_parity_dsl_matches_the_builder_model() {
             mapping "0" => "Down";
             mapping "1" => "Up" { color: green; }
             link "Runbook" => "https://runbook";
-            link "Dashboard" => "https://dash" { target_blank: true; tags: ["ops"]; }
+            link "Dashboard" => "https://dash" { target_blank: true; keep_time: true; }
             reduce { values: true; calculations: [mean, max]; fields: "/.*/"; }
         }
 
@@ -895,13 +895,13 @@ fn panel_option_parity_dsl_matches_the_builder_model() {
                 .color_mode(StatColorMode::Background)
                 .wide_layout(true)
                 .color(ColorScheme::Fixed(Color::Red))
-                .mapping(ValueMapping::new("0", "Down"))
-                .mapping(ValueMapping::new("1", "Up").color(Color::Green))
-                .link(DashboardLink::new("Runbook", "https://runbook"))
+                .mapping(ValueMapping::value("0").text("Down"))
+                .mapping(ValueMapping::value("1").text("Up").color(Color::Green))
+                .link(DataLink::new("Runbook", "https://runbook"))
                 .link(
-                    DashboardLink::new("Dashboard", "https://dash")
+                    DataLink::new("Dashboard", "https://dash")
                         .target_blank(true)
-                        .tags(["ops"]),
+                        .keep_time(true),
                 )
                 .reduce_options(
                     ReduceOptions::new()
@@ -955,7 +955,7 @@ fn panel_option_parity_emits_the_grafana_wire_values() {
             wide_layout: true;
             color: fixed(red);
             mapping "1" => "Up" { color: green; }
-            link "Runbook" => "https://runbook" { target_blank: true; tags: ["ops"]; }
+            link "Runbook" => "https://runbook" { target_blank: true; include_vars: true; }
             reduce { values: true; calculations: [mean, max]; fields: "/.*/"; }
         }
     };
@@ -992,14 +992,13 @@ fn panel_option_parity_emits_the_grafana_wire_values() {
     );
     assert_eq!(
         stat["fieldConfig"]["defaults"]["mappings"],
-        json!([{"options": {"1": {"color": "green", "text": "Up"}}, "type": "value"}])
+        json!([{"options": {"1": {"color": "green", "index": 0, "text": "Up"}}, "type": "value"}])
     );
     assert_eq!(
         stat["links"],
         json!([{
-            "includeVars": false, "keepTime": false, "tags": ["ops"],
-            "targetBlank": true, "title": "Runbook", "type": "link",
-            "url": "https://runbook"
+            "targetBlank": true, "title": "Runbook",
+            "url": "https://runbook?$__all_variables"
         }])
     );
 }
@@ -1245,6 +1244,176 @@ fn variable_selector_mistakes_are_reported_not_guessed() {
             "expected {expected:?} in {rendered:?}"
         );
     }
+}
+
+/// Every DSL arm for repeats, query options, time overrides, value mappings, data links, and annotations, against the builder calls it stands for. Non-default values throughout, so an arm that does nothing cannot pass by matching a default.
+#[test]
+fn panel_feature_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Features";
+        datasource: prometheus("prometheus-main");
+        built_in_annotation: BuiltInAnnotation::new().enable(false);
+
+        variable "instance" {
+            values: ["a", "b"];
+        }
+
+        annotation "Restarts" => "changes(process_start_time_seconds[2m]) > 0" {
+            datasource: prometheus("prometheus-other");
+            enable: false;
+            hide: true;
+            icon_color: orange;
+            step: "60s";
+            title_format: "Restart";
+            text_format: "{{instance}}";
+            tag_keys: ["job", "instance"];
+            use_value_for_time: true;
+        }
+        annotation "Custom color" => "up == 0" { icon_color: "#ff00ff"; }
+        annotation "Bare" => "up == 0";
+        annotation: RawAnnotation::new("Deploys").datasource(loki("loki-main"));
+
+        row "Per instance" {
+            repeat: "instance";
+
+            timeseries "Rate" {
+                query: promql!("up");
+                min_interval: "1m";
+                max_data_points: 500;
+                time_from: "24h";
+                time_shift: "1d";
+                hide_time_override: true;
+                repeat: horizontal("instance", 3);
+                link "Runbook" => "https://runbook.example" { target_blank: true; include_vars: true; keep_time: true; }
+                link "Plain" => "https://plain.example";
+                data_link "Logs" => "/explore?instance=${__field.labels.instance}" { keep_time: true; }
+                data_link "Bare" => "/bare";
+            }
+        }
+
+        stat "Status" {
+            query: promql!("up");
+            repeat: vertical("instance");
+            mapping "1" => "Up" { color: green; }
+            mapping range(0.0, 0.5) => "Low" { color: red; }
+            mapping range(0.5, None) => "High";
+            mapping regex("^prod-(.*)$") => "$1" { color: blue; }
+            mapping regex("^dev-.*$") => "Dev";
+            mapping special(null) => "Null" { color: yellow; }
+            mapping special(nan) => "NaN";
+            mapping special(null_or_nan) => "Gap";
+            mapping special(true) => "Yes";
+            mapping special(false) => "No";
+            mapping special(empty) => "Empty";
+
+            override field("status") {
+                data_link "Status" => "/status" { target_blank: true; }
+                data_link "Plain" => "/plain";
+            }
+        }
+
+        gauge "Saturation" {
+            query: promql!("up");
+            repeat: horizontal("instance");
+        }
+
+        bar_gauge "Routes" {
+            query: promql!("up");
+            repeat: String::from("instance");
+        }
+    };
+
+    let from_builder = Dashboard::new("Features")
+        .datasource(prometheus("prometheus-main"))
+        .built_in_annotation(BuiltInAnnotation::new().enable(false))
+        .variable(CustomVariable::new("instance", ["a", "b"]))
+        .annotation(
+            PrometheusAnnotation::new("Restarts", "changes(process_start_time_seconds[2m]) > 0")
+                .datasource(prometheus("prometheus-other"))
+                .enable(false)
+                .hide(true)
+                .icon_color(Color::Orange)
+                .step("60s")
+                .title_format("Restart")
+                .text_format("{{instance}}")
+                .tag_keys(["job", "instance"])
+                .use_value_for_time(true),
+        )
+        .annotation(
+            PrometheusAnnotation::new("Custom color", "up == 0")
+                .icon_color(Color::custom("#ff00ff")),
+        )
+        .annotation(PrometheusAnnotation::new("Bare", "up == 0"))
+        .annotation(RawAnnotation::new("Deploys").datasource(loki("loki-main")))
+        .row(
+            Row::new("Per instance").repeat("instance").panel(
+                Timeseries::new("Rate")
+                    .query(PrometheusQuery::new("up"))
+                    .min_interval("1m")
+                    .max_data_points(500)
+                    .time_from("24h")
+                    .time_shift("1d")
+                    .hide_time_override(true)
+                    .repeat(Repeat::horizontal("instance").max_per_row(3))
+                    .link(
+                        DataLink::new("Runbook", "https://runbook.example")
+                            .target_blank(true)
+                            .include_vars(true)
+                            .keep_time(true),
+                    )
+                    .link(DataLink::new("Plain", "https://plain.example"))
+                    .data_link(
+                        DataLink::new("Logs", "/explore?instance=${__field.labels.instance}")
+                            .keep_time(true),
+                    )
+                    .data_link(DataLink::new("Bare", "/bare")),
+            ),
+        )
+        .panel(
+            Stat::new("Status")
+                .query(PrometheusQuery::new("up"))
+                .repeat(Repeat::vertical("instance"))
+                .mapping(ValueMapping::value("1").text("Up").color(Color::Green))
+                .mapping(ValueMapping::range(0.0, 0.5).text("Low").color(Color::Red))
+                .mapping(ValueMapping::range(0.5, None).text("High"))
+                .mapping(
+                    ValueMapping::regex("^prod-(.*)$")
+                        .text("$1")
+                        .color(Color::Blue),
+                )
+                .mapping(ValueMapping::regex("^dev-.*$").text("Dev"))
+                .mapping(
+                    ValueMapping::special(SpecialValue::Null)
+                        .text("Null")
+                        .color(Color::Yellow),
+                )
+                .mapping(ValueMapping::special(SpecialValue::NaN).text("NaN"))
+                .mapping(ValueMapping::special(SpecialValue::NullOrNaN).text("Gap"))
+                .mapping(ValueMapping::special(SpecialValue::True).text("Yes"))
+                .mapping(ValueMapping::special(SpecialValue::False).text("No"))
+                .mapping(ValueMapping::special(SpecialValue::Empty).text("Empty"))
+                .override_field(
+                    FieldOverride::by_name("status")
+                        .data_link(DataLink::new("Status", "/status").target_blank(true))
+                        .data_link(DataLink::new("Plain", "/plain")),
+                ),
+        )
+        .panel(
+            Gauge::new("Saturation")
+                .query(PrometheusQuery::new("up"))
+                .repeat(Repeat::horizontal("instance")),
+        )
+        .panel(
+            BarGauge::new("Routes")
+                .query(PrometheusQuery::new("up"))
+                .repeat("instance"),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
 }
 
 #[test]

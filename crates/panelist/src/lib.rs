@@ -51,12 +51,14 @@
 //! # Ok::<(), panelist::Error>(())
 //! ```
 
+mod annotation;
 mod dashboard;
 mod datasource;
 mod field;
 mod grafana;
 mod heatmap;
 mod keyed_table;
+mod link;
 mod macros;
 mod panel;
 mod query;
@@ -68,20 +70,22 @@ mod validation;
 mod variable;
 mod visualization;
 
+pub use annotation::{Annotation, BuiltInAnnotation, PrometheusAnnotation, RawAnnotation};
 pub use dashboard::{
     Dashboard, DashboardCursorSync, DashboardItem, DashboardLink, PanelIds, Row, TimeRange,
 };
 pub use datasource::{DataSource, loki, prometheus};
 pub use field::{
     Color, ColorScheme, ContinuousPalette, Currency, FieldConfig, FieldOverride, Legend,
-    LegendMode, LegendPlacement, OverrideMatcher, OverrideProperty, ThresholdMode, Thresholds,
-    Unit, ValueMapping,
+    LegendMode, LegendPlacement, OverrideMatcher, OverrideProperty, SpecialValue, ThresholdMode,
+    Thresholds, Unit, ValueMapping,
 };
 pub use heatmap::{HeatmapColorMode, HeatmapColorScheme};
 pub use keyed_table::{Column, KeyedTable};
+pub use link::{DataLink, DataLinkVariable};
 pub use panel::{
-    BarGauge, Gauge, GridPos, Heatmap, Panel, PanelBuilder, PanelKind, RawPanel, Stat, Table, Text,
-    TextMode, Timeseries,
+    BarGauge, Gauge, GridPos, Heatmap, HorizontalRepeat, Panel, PanelBuilder, PanelKind, RawPanel,
+    Repeat, Stat, Table, Text, TextMode, Timeseries, VerticalRepeat,
 };
 pub use query::{
     LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, QueryType,
@@ -116,20 +120,21 @@ pub mod __private {
 /// Common dashboard-authoring types, builders, helpers, and macros.
 pub mod prelude {
     pub use crate::{
-        AxisPlacement, BarGauge, BarGaugeDisplayMode, CellBackgroundMode, CellValueDisplay, Color,
-        ColorScheme, ColoredBackgroundCell, Column, ConstantVariable, ContinuousPalette, Currency,
-        CustomVariable, Dashboard, DashboardCursorSync, DashboardLink, DataSource,
+        Annotation, AxisPlacement, BarGauge, BarGaugeDisplayMode, BuiltInAnnotation,
+        CellBackgroundMode, CellValueDisplay, Color, ColorScheme, ColoredBackgroundCell, Column,
+        ConstantVariable, ContinuousPalette, Currency, CustomVariable, Dashboard,
+        DashboardCursorSync, DashboardLink, DataLink, DataLinkVariable, DataSource,
         DataSourceVariable, FieldConfig, FieldOverride, Gauge, GaugeCell, GrafanaTarget, GridPos,
         Heatmap, HeatmapColorMode, HeatmapColorScheme, JoinByField, JoinMode, KeyedTable,
         LabelsToFields, LabelsToFieldsMode, Legend, LegendMode, LegendPlacement, LineInterpolation,
         LokiQuery, OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel, PanelIds,
-        PanelKind, PointVisibility, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode,
-        QueryType, QueryVariable, RawPanel, RawQuery, RawTransformation, ReduceOptions, Reducer,
-        RenameByRegex, Row, SortBy, SortDirection, SparklineCell, Stacking, StackingMode, Stat,
-        StatColorMode, StatGraphMode, Table, TableCell, TableCellType, Text, TextMode,
-        ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable, Timeseries, Tooltip, TooltipMode,
-        TooltipSort, Transformation, Unit, ValueMapping, Variable, VariableBuilder,
-        VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus,
-        promql,
+        PanelKind, PointVisibility, PrometheusAnnotation, PrometheusFormat, PrometheusQuery, Query,
+        QueryEditorMode, QueryType, QueryVariable, RawAnnotation, RawPanel, RawQuery,
+        RawTransformation, ReduceOptions, Reducer, RenameByRegex, Repeat, Row, SortBy,
+        SortDirection, SparklineCell, SpecialValue, Stacking, StackingMode, Stat, StatColorMode,
+        StatGraphMode, Table, TableCell, TableCellType, Text, TextMode, ThresholdMode, Thresholds,
+        TimeRange, TimeSeriesToTable, Timeseries, Tooltip, TooltipMode, TooltipSort,
+        Transformation, Unit, ValueMapping, Variable, VariableBuilder, VariableRefresh,
+        VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus, promql,
     };
 }

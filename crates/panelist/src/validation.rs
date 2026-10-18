@@ -352,6 +352,49 @@ pub enum ValidationError {
         /// The referenced variable, declared later or the variable itself.
         name: String,
     },
+    /// A panel or row repeats by a variable the dashboard does not declare, so Grafana would never expand it.
+    #[error(
+        "{kind} \"{title}\": repeats by variable \"{variable}\", which the dashboard does not declare"
+    )]
+    UnknownRepeatVariable {
+        /// `"panel"` or `"row"`.
+        kind: &'static str,
+        /// Panel or row title.
+        title: String,
+        /// The undeclared variable name.
+        variable: String,
+    },
+    /// A panel query option, time override, or repeat setting has a value Grafana cannot use.
+    #[error("panel \"{panel}\": {option} \"{value}\" is invalid; expected {expected}")]
+    InvalidPanelOption {
+        /// Panel title.
+        panel: String,
+        /// The builder option, such as `time_shift`.
+        option: &'static str,
+        /// The rejected value.
+        value: String,
+        /// What Grafana accepts.
+        expected: &'static str,
+    },
+    /// A value mapping can never match, or matches without changing anything.
+    #[error("panel \"{panel}\": value mapping {reason}")]
+    InvalidValueMapping {
+        /// Panel title.
+        panel: String,
+        /// Why the mapping is unusable.
+        reason: &'static str,
+    },
+    /// Two exact-value mappings in one mapping list match the same value. Grafana keys exact values in one object, so only the last would survive.
+    #[error("panel \"{panel}\": more than one value mapping matches the exact value \"{value}\"")]
+    DuplicateValueMapping {
+        /// Panel title.
+        panel: String,
+        /// The value mapped more than once.
+        value: String,
+    },
+    /// An annotation name is empty.
+    #[error("annotation name must not be empty")]
+    MissingAnnotationName,
 }
 
 /// Where a template-variable reference was found.

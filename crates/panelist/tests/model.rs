@@ -280,8 +280,8 @@ fn serializes_datasource_and_complete_variable_state() {
 #[test]
 fn serializes_value_mappings_and_threshold_overrides() {
     let panel = Stat::new("Health")
-        .mapping(ValueMapping::new("0", "Unhealthy").color(Color::Red))
-        .mapping(ValueMapping::new("1", "Healthy").color(Color::Green))
+        .mapping(ValueMapping::value("0").text("Unhealthy").color(Color::Red))
+        .mapping(ValueMapping::value("1").text("Healthy").color(Color::Green))
         .override_field(
             FieldOverride::by_name("availability")
                 .thresholds(Thresholds::absolute(Color::Red).step(1.0, Color::Green)),
@@ -1128,7 +1128,7 @@ fn unknown_references_name_the_site_and_field() {
                         .legend_format("{{route}} $legend")
                         .datasource(prometheus("$query_source")),
                 )
-                .link(DashboardLink::new("Logs", "/explore?pod=$panel_link")),
+                .link(DataLink::new("Logs", "/explore?pod=$panel_link")),
         );
 
     let errors = dashboard.validate().unwrap_err();
@@ -1219,7 +1219,7 @@ fn grafana_builtins_need_no_declaration() {
                     PrometheusQuery::new("f{user=\"${__user.login}\", tz=\"$__timezone\"}")
                         .legend_format("${__from:date:iso} to ${__to:date:seconds} on $__dashboard"),
                 )
-                .link(DashboardLink::new("Panel", "/d/x?from=$__from&to=$__to&v=$__all")),
+                .link(DataLink::new("Panel", "/d/x?from=$__from&to=$__to&v=$__all")),
         );
 
     dashboard.validate().unwrap();
@@ -1402,11 +1402,190 @@ fn dollar_signs_that_are_not_references_are_ignored() {
     dashboard.validate().unwrap();
 }
 
-fn validation_errors(dashboard: &Dashboard) -> Vec<ValidationError> {
+fn errors_of(dashboard: &Dashboard) -> Vec<ValidationError> {
     match dashboard.validate() {
         Ok(()) => Vec::new(),
         Err(errors) => errors.errors().to_vec(),
     }
+}
+
+fn up() -> PrometheusQuery {
+    PrometheusQuery::new("up")
+}
+
+#[test]
+fn a_repeat_by_an_undeclared_variable_is_rejected_for_panels_and_rows() {
+    let dashboard = Dashboard::new("Repeat")
+        .variable(CustomVariable::new("instance", ["a", "b"]))
+        .panel(Stat::new("Declared").query(up()).repeat("instance"))
+        .panel(Stat::new("Prefixed").query(up()).repeat("$instance"))
+        .row(
+            Row::new("Regions").repeat("region").panel(
+                Stat::new("Vertical")
+                    .query(up())
+                    .repeat(Repeat::vertical("job")),
+            ),
+        );
+
+    assert_eq!(
+        errors_of(&dashboard),
+        vec![
+            ValidationError::UnknownRepeatVariable {
+                kind: "panel",
+                title: "Prefixed".to_owned(),
+                variable: "$instance".to_owned(),
+            },
+            ValidationError::UnknownRepeatVariable {
+                kind: "row",
+                title: "Regions".to_owned(),
+                variable: "region".to_owned(),
+            },
+            ValidationError::UnknownRepeatVariable {
+                kind: "panel",
+                title: "Vertical".to_owned(),
+                variable: "job".to_owned(),
+            },
+        ]
+    );
+    assert_eq!(
+        errors_of(&dashboard)[1].to_string(),
+        "row \"Regions\": repeats by variable \"region\", which the dashboard does not declare"
+    );
+}
+
+#[test]
+fn grafana_duration_and_time_span_options_accept_what_grafana_parses() {
+    for (interval, time_from, time_shift) in [
+        ("30s", "24h", "1d"),
+        ("1.5m", "now/d", "1d/d"),
+        ("250ms", "now-7d/d", "2w"),
+        ("15", "$range", "$shift"),
+        ("$interval", "1y", "1M/M"),
+    ] {
+        let dashboard = Dashboard::new("Options").panel(
+            Timeseries::new("Rate")
+                .query(up())
+                .min_interval(interval)
+                .time_from(time_from)
+                .time_shift(time_shift)
+                .max_data_points(1),
+        );
+        assert_eq!(
+            errors_of(&dashboard),
+            Vec::new(),
+            "{interval} {time_from} {time_shift}"
+        );
+    }
+}
+
+#[test]
+fn malformed_query_options_and_max_per_row_are_rejected() {
+    let dashboard = Dashboard::new("Options")
+        .variable(CustomVariable::new("instance", ["a"]))
+        .panel(
+            Timeseries::new("Rate")
+                .query(up())
+                .min_interval("1 m")
+                .max_data_points(0)
+                .time_from("yesterday")
+                .time_shift("1.5h")
+                .repeat(Repeat::horizontal("instance").max_per_row(0)),
+        );
+    let options: Vec<(&str, String)> = errors_of(&dashboard)
+        .into_iter()
+        .map(|error| match error {
+            ValidationError::InvalidPanelOption { option, value, .. } => (option, value),
+            other => panic!("unexpected error {other}"),
+        })
+        .collect();
+
+    assert_eq!(
+        options,
+        vec![
+            ("min_interval", "1 m".to_owned()),
+            ("max_data_points", "0".to_owned()),
+            ("time_from", "yesterday".to_owned()),
+            ("time_shift", "1.5h".to_owned()),
+            ("max_per_row", "0".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn unusable_value_mappings_are_rejected_in_defaults_and_overrides() {
+    let dashboard = Dashboard::new("Mappings").panel(
+        Stat::new("Status")
+            .query(up())
+            .mapping(ValueMapping::range(None, None).text("Any"))
+            .mapping(ValueMapping::range(5.0, 1.0).text("Never"))
+            .mapping(ValueMapping::range(f64::NEG_INFINITY, 0.0).text("Negative"))
+            .mapping(ValueMapping::regex("").text("Empty"))
+            .mapping(ValueMapping::value("1").text("Up"))
+            .mapping(ValueMapping::value("1").text("Up again"))
+            .override_field(
+                FieldOverride::by_name("x").mapping(ValueMapping::special(SpecialValue::Null)),
+            ),
+    );
+
+    assert_eq!(
+        errors_of(&dashboard)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        vec![
+            "panel \"Status\": value mapping range must set at least one end",
+            "panel \"Status\": value mapping range starts after it ends, so it can never match",
+            "panel \"Status\": value mapping range ends must be finite",
+            "panel \"Status\": value mapping regex pattern must not be empty",
+            "panel \"Status\": more than one value mapping matches the exact value \"1\"",
+            "panel \"Status\": value mapping sets neither text nor color, so it changes nothing",
+        ]
+    );
+}
+
+#[test]
+fn annotations_need_a_name_and_a_prometheus_expression() {
+    let dashboard = Dashboard::new("Annotations")
+        .annotation(PrometheusAnnotation::new(" ", "up == 0"))
+        .annotation(PrometheusAnnotation::new("Empty", ""))
+        .annotation(RawAnnotation::new("Raw"));
+
+    assert_eq!(
+        errors_of(&dashboard),
+        vec![
+            ValidationError::MissingAnnotationName,
+            ValidationError::MissingQueryExpression {
+                panel: "annotation Empty".to_owned(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_dashboard_using_every_new_option_validates_and_round_trips_deterministically() {
+    let build = || {
+        Dashboard::new("Everything")
+            .datasource(prometheus("prometheus-main"))
+            .variable(CustomVariable::new("instance", ["a", "b"]))
+            .annotation(PrometheusAnnotation::new("Restarts", "up == 0"))
+            .row(
+                Row::new("Per instance").repeat("instance").panel(
+                    Timeseries::new("Rate on $instance")
+                        .query(up())
+                        .min_interval("1m")
+                        .time_from("6h")
+                        .repeat(Repeat::horizontal("instance").max_per_row(2))
+                        .mapping(ValueMapping::special(SpecialValue::NullOrNaN).text("Gap"))
+                        .data_link(DataLink::new("Logs", "/explore").keep_time(true)),
+                ),
+            )
+    };
+
+    assert_eq!(errors_of(&build()), Vec::new());
+    assert_eq!(
+        build().to_json_pretty().unwrap(),
+        build().to_json_pretty().unwrap()
+    );
 }
 
 #[test]
@@ -1429,7 +1608,7 @@ fn loki_rejects_the_combined_query_type_and_prometheus_accepts_it() {
             .query(LokiQuery::new("{job=\"api\"}").query_type(QueryType::Both)),
     );
     assert_eq!(
-        validation_errors(&dashboard),
+        errors_of(&dashboard),
         [ValidationError::UnsupportedQueryType {
             panel: "Mixed evaluations".to_owned(),
             ref_id: "B".to_owned(),
@@ -1448,12 +1627,12 @@ fn a_mixed_panel_requires_a_datasource_on_every_query() {
     }];
 
     let on_panel = Dashboard::new("Mixed").panel(panel.clone().datasource(DataSource::mixed()));
-    assert_eq!(validation_errors(&on_panel), expected);
+    assert_eq!(errors_of(&on_panel), expected);
 
     let inherited = Dashboard::new("Mixed")
         .datasource(DataSource::mixed())
         .panel(panel);
-    assert_eq!(validation_errors(&inherited), expected);
+    assert_eq!(errors_of(&inherited), expected);
 }
 
 #[test]
@@ -1468,7 +1647,7 @@ fn mixed_is_the_builtin_datasource_reference() {
 #[test]
 fn a_raw_query_needs_an_expression_or_an_extra_key() {
     let missing = |query: RawQuery| {
-        validation_errors(&Dashboard::new("Raw").panel(Timeseries::new("Raw").query(query)))
+        errors_of(&Dashboard::new("Raw").panel(Timeseries::new("Raw").query(query)))
             .iter()
             .any(|error| matches!(error, ValidationError::MissingQueryExpression { .. }))
     };
@@ -1488,7 +1667,7 @@ fn a_variable_query_still_needs_an_expression() {
         RawQuery::new().extra("namespace", json!("AWS/EC2")),
     ));
     assert!(matches!(
-        validation_errors(&dashboard).as_slice(),
+        errors_of(&dashboard).as_slice(),
         [ValidationError::MissingQueryExpression { panel }] if panel == "variable region"
     ));
 }
@@ -1509,7 +1688,7 @@ fn thresholds_are_validated_wherever_they_appear() {
             .override_field(FieldOverride::by_name("up").thresholds(decreasing.clone())),
         Stat::new("Query").query(PrometheusQuery::new("up").thresholds(non_finite.clone())),
     ] {
-        let errors = validation_errors(&Dashboard::new("Thresholds").panel(panel));
+        let errors = errors_of(&Dashboard::new("Thresholds").panel(panel));
         assert!(
             matches!(
                 errors.as_slice(),
@@ -1524,7 +1703,7 @@ fn thresholds_are_validated_wherever_they_appear() {
             .query(PrometheusQuery::new("up"))
             .thresholds(Thresholds::percentage(Color::Red)),
     );
-    assert!(validation_errors(&valid).is_empty());
+    assert!(errors_of(&valid).is_empty());
 }
 
 /// Per-query overrides follow reference ID assignment: a query without an explicit ID gets the first letter no explicit ID already holds.
@@ -1556,7 +1735,7 @@ fn duplicate_explicit_ref_ids_are_caught_with_query_field_properties() {
             .query(PrometheusQuery::new("second").ref_id("A").color(Color::Red)),
     );
     assert_eq!(
-        validation_errors(&dashboard),
+        errors_of(&dashboard),
         [ValidationError::DuplicateQueryRefId {
             panel: "Traffic".to_owned(),
             ref_id: "A".to_owned(),
@@ -1587,7 +1766,7 @@ fn rename_by_regex_reports_an_unknown_ref_id_filter() {
             .transform(RenameByRegex::new("(.*)-api", "$1").only_ref_id("Z")),
     );
     assert!(matches!(
-        validation_errors(&dashboard).as_slice(),
+        errors_of(&dashboard).as_slice(),
         [ValidationError::UnknownTransformationRefId { ref_id, .. }] if ref_id == "Z"
     ));
 }
