@@ -27,8 +27,8 @@ use serde::{Serialize, Serializer};
 use serde_json::Value;
 
 use crate::{
-    Annotation, BuiltInAnnotation, DataSource, Error, GrafanaTarget, Panel, Result, Variable,
-    grafana, validation::ValidationErrors,
+    Annotation, BuiltInAnnotation, DataSource, Error, GrafanaTarget, Panel, ResolvedDashboard,
+    Result, Variable, grafana, validation::ValidationErrors,
 };
 
 /// How Panelist assigns numeric IDs to panels and rows that do not set one.
@@ -483,7 +483,56 @@ impl Dashboard {
 
     /// Validates all authoring values without serializing JSON.
     pub fn validate(&self) -> std::result::Result<(), ValidationErrors> {
-        grafana::normalize(self).map(|_| ())
+        grafana::resolve(self).map(|_| ())
+    }
+
+    /// Validates the dashboard and returns a read-only view of it with every panel ID, query reference ID, grid position, and inherited datasource resolved.
+    ///
+    /// The view comes from the same pass that serialization uses, so it describes exactly the dashboard Grafana receives. It is meant for invariant tests and lints that would otherwise parse the emitted JSON and walk `serde_json::Value` by hand. [`ResolvedDashboard::panels`] includes panels inside collapsed rows, which a walk over the JSON's top-level `panels` array misses.
+    ///
+    /// # Examples
+    ///
+    /// A lint that every stat panel declares its own thresholds. Grafana seeds a stat that emits none with a red step at 80, which silently colors any value that reaches it.
+    ///
+    /// ```rust
+    /// use panelist::prelude::*;
+    ///
+    /// fn stats_without_thresholds(dashboard: &Dashboard) -> panelist::Result<Vec<String>> {
+    ///     Ok(dashboard
+    ///         .resolve()?
+    ///         .panels()
+    ///         .filter(|panel| matches!(panel.kind(), PanelKind::Stat))
+    ///         .filter(|panel| panel.field_config().thresholds().is_none())
+    ///         .map(|panel| format!("{} (panel {})", panel.title(), panel.id()))
+    ///         .collect())
+    /// }
+    ///
+    /// let dashboard = Dashboard::new("Service")
+    ///     .datasource(prometheus("prometheus-main"))
+    ///     .panel(
+    ///         Stat::new("Requests")
+    ///             .query(promql!("sum(rate(requests_total[$__rate_interval]))"))
+    ///             .thresholds(Thresholds::absolute(Color::Green)),
+    ///     )
+    ///     .row(
+    ///         Row::new("Details")
+    ///             .collapsed(true)
+    ///             .panel(Stat::new("Errors").query(promql!("sum(errors_total)"))),
+    ///     );
+    ///
+    /// // The collapsed row's stat is found even though Grafana nests it inside the row.
+    /// assert_eq!(stats_without_thresholds(&dashboard)?, ["Errors (panel 3)"]);
+    ///
+    /// // Resolved values match the emitted JSON: query reference IDs and inherited datasources included.
+    /// let resolved = dashboard.resolve()?;
+    /// let errors = resolved.panels().find(|panel| panel.title() == "Errors").unwrap();
+    /// assert_eq!(errors.row().map(|row| row.title()), Some("Details"));
+    /// assert_eq!(errors.queries()[0].ref_id(), "A");
+    /// assert_eq!(errors.queries()[0].datasource().map(DataSource::uid), Some("prometheus-main"));
+    /// # Ok::<(), panelist::Error>(())
+    /// ```
+    pub fn resolve(&self) -> std::result::Result<ResolvedDashboard<'_>, ValidationErrors> {
+        grafana::resolve(self)
     }
 
     /// Serializes compact deterministic Grafana JSON.

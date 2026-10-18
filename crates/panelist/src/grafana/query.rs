@@ -23,7 +23,10 @@
 
 use std::collections::HashSet;
 
-use crate::{DataSource, FieldOverride, OverrideMatcher, PrometheusFormat, Query, QueryType};
+use crate::{
+    DataSource, FieldOverride, OverrideMatcher, Panel, PrometheusFormat, Query, QueryType,
+    resolved::ResolvedQuery,
+};
 
 use super::layout::reference_id;
 use super::wire::GrafanaTarget;
@@ -52,31 +55,44 @@ pub(crate) fn effective_ref_ids(queries: &[Query]) -> Vec<String> {
         .collect()
 }
 
-/// The field overrides queries carry through their own field properties, in query order.
-///
-/// Each query with properties becomes one override matching its resolved reference ID, so this runs after reference IDs are assigned. A panel emits these before its own overrides: Grafana applies overrides in array order and a later one wins, so a panel-level override stays free to refine one series of a query.
-pub(crate) fn query_field_overrides(queries: &[Query]) -> Vec<FieldOverride> {
-    queries
+/// Pairs each of a panel's queries with its effective reference ID, the datasource it runs against, and the panel's minimum interval.
+pub(crate) fn resolve_queries<'a>(
+    panel: &'a Panel,
+    panel_datasource: Option<&'a DataSource>,
+) -> Vec<ResolvedQuery<'a>> {
+    let panel_min_interval = panel.query_options.min_interval.as_deref();
+    panel
+        .queries
         .iter()
-        .zip(effective_ref_ids(queries))
-        .filter(|(query, _)| !query.options().field_properties.is_empty())
-        .map(|(query, ref_id)| FieldOverride {
-            matcher: OverrideMatcher::QueryRefId(ref_id),
-            properties: query.options().field_properties.clone(),
+        .zip(effective_ref_ids(&panel.queries))
+        .map(|(query, ref_id)| ResolvedQuery {
+            query,
+            ref_id,
+            datasource: query.options().datasource.as_ref().or(panel_datasource),
+            panel_min_interval,
         })
         .collect()
 }
 
-pub(crate) fn normalize_targets(
-    queries: &[Query],
-    panel_datasource: Option<&DataSource>,
-) -> Vec<GrafanaTarget> {
-    let ref_ids = effective_ref_ids(queries);
-
+/// The field overrides queries carry through their own field properties, in query order.
+///
+/// Each query with properties becomes one override matching its resolved reference ID. A panel emits these before its own overrides: Grafana applies overrides in array order and a later one wins, so a panel-level override stays free to refine one series of a query.
+pub(crate) fn query_field_overrides(queries: &[ResolvedQuery<'_>]) -> Vec<FieldOverride> {
     queries
         .iter()
-        .zip(ref_ids)
-        .map(|(query, ref_id)| {
+        .filter(|resolved| !resolved.field_properties().is_empty())
+        .map(|resolved| FieldOverride {
+            matcher: OverrideMatcher::QueryRefId(resolved.ref_id().to_owned()),
+            properties: resolved.field_properties().to_vec(),
+        })
+        .collect()
+}
+
+pub(crate) fn normalize_targets(queries: &[ResolvedQuery<'_>]) -> Vec<GrafanaTarget> {
+    queries
+        .iter()
+        .map(|resolved| {
+            let query = resolved.query();
             let options = query.options();
             // Wire states per evaluation, for Prometheus-style targets:
             //   unset    no `instant`, no `range` (the datasource default)
@@ -96,8 +112,8 @@ pub(crate) fn normalize_targets(
             };
 
             GrafanaTarget {
-                ref_id,
-                datasource: options.datasource.as_ref().or(panel_datasource).cloned(),
+                ref_id: resolved.ref_id().to_owned(),
+                datasource: resolved.datasource().cloned(),
                 expr: query.expression().map(ToOwned::to_owned),
                 format: query.prometheus_format().map(|format| match format {
                     PrometheusFormat::TimeSeries => "time_series",

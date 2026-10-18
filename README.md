@@ -683,6 +683,36 @@ Grafana resolves variables in declaration order. A chained query variable may on
 
 Some `$` signs are not references and never trip the check. Variable `regex` options are not scanned, so anchors like `/^(prod|staging)$/` are fine. Capture references like `$1` and `${1}` in `label_replace` are ignored, because no variable can have an all-digit name. A `$` followed by no name, as in `"^api$"`, starts no reference.
 
+## Inspecting dashboards
+
+Validation catches what Panelist knows is wrong. Your own rules, like "every stat states its thresholds" or "every query against a slow job sets its interval", belong in your tests. `Dashboard::resolve` gives those tests a typed, read-only view, so they never parse the JSON back:
+
+```rust
+use panelist::prelude::*;
+
+fn check(dashboard: &Dashboard) -> panelist::Result<()> {
+    for panel in dashboard.resolve()?.panels() {
+        if matches!(panel.kind(), PanelKind::Stat) {
+            assert!(
+                panel.field_config().thresholds().is_some(),
+                "stat {:?} inherits Grafana's default thresholds",
+                panel.title()
+            );
+        }
+        for query in panel.queries() {
+            if query.expression().is_some_and(|expr| expr.contains("job=\"batch-exporter\"")) {
+                assert_eq!(query.interval(), Some("1m"), "query {} in {:?}", query.ref_id(), panel.title());
+            }
+        }
+    }
+    Ok(())
+}
+# check(&Dashboard::new("Example"))?;
+# Ok::<(), panelist::Error>(())
+```
+
+The view comes from the same pass that serialization runs, so it shows exactly what Grafana receives. Panel IDs, query reference IDs, and grid positions are filled in. Each panel and query reports the datasource it actually inherits. `panels()` also visits panels inside collapsed rows, which a walk over the JSON's top-level `panels` array silently skips. Units, colors, thresholds, and override matchers stay typed values, not strings to compare.
+
 ## Grafana compatibility
 
 Panelist emits Grafana Classic dashboard JSON. Classic remains importable and exportable in Grafana 13, works with file provisioning, and retains the numeric panel IDs and `gridPos` behavior that Panelist automates. Grafana's newer V2 resource model uses a different layout representation.
