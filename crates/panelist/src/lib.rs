@@ -50,6 +50,8 @@
 //! assert!(json.contains("http_requests_total"));
 //! # Ok::<(), panelist::Error>(())
 //! ```
+//!
+//! [`Dashboard::resolve`] returns a read-only [`ResolvedDashboard`] with every panel ID, query reference ID, grid position, and inherited datasource filled in, so tests and lints can check dashboard invariants without parsing the JSON back.
 
 mod annotation;
 mod dashboard;
@@ -63,6 +65,7 @@ mod macros;
 mod panel;
 mod query;
 pub mod render;
+mod resolved;
 mod table;
 mod target;
 mod transformation;
@@ -91,6 +94,10 @@ pub use query::{
     LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery,
 };
 pub use render::DashboardSet;
+pub use resolved::{
+    PanelRow, ResolvedDashboard, ResolvedFieldConfig, ResolvedItem, ResolvedPanel, ResolvedQuery,
+    ResolvedRow, ResolvedThresholdStep, ResolvedThresholds,
+};
 pub use table::{
     CellBackgroundMode, CellValueDisplay, ColoredBackgroundCell, GaugeCell, SparklineCell,
     TableCell, TableCellType,

@@ -54,6 +54,8 @@ serialization pass:
 6. converts semantic units, thresholds, legends, fields, variables, and links,
 7. serializes ordered maps and structs to stable JSON.
 
+Steps 1 to 5 form one resolution pass. Its result is public as the read-only `ResolvedDashboard` from `Dashboard::resolve`, and serialization lowers that same value, so what callers inspect is what Grafana receives. `ResolvedDashboard` pairs resolved facts with authored typed values, never with wire structs, so exposing it does not freeze the wire model. Grid positions are the one Classic-specific fact in it.
+
 This boundary permits a future `GrafanaV2` output target to share the public
 builders while replacing only layout normalization and the wire model.
 

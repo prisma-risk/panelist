@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 use crate::{
     CellBackgroundMode, CellValueDisplay, ColorScheme, FieldConfig, FieldOverride, OverrideMatcher,
     OverrideProperty, PanelKind, SpecialValue, Stacking, TableCell, ThresholdMode, Thresholds,
-    ValueMapping, field::ValueMatch, panel::PanelOptions,
+    ValueMapping, field::ValueMatch, panel::PanelOptions, resolved::ResolvedThresholds,
 };
 
 use super::link::data_links_value;
@@ -357,30 +357,16 @@ pub(crate) fn color_scheme_value(scheme: &ColorScheme) -> Value {
 }
 
 pub(crate) fn thresholds_value(thresholds: &Thresholds) -> Value {
-    let mut steps = Vec::new();
-    if thresholds
-        .steps
-        .first()
-        .is_none_or(|step| step.value.is_some())
-    {
-        let step_color = thresholds
-            .steps
-            .first()
-            .map_or("green", |step| color(&step.color));
-        steps.push(json!({"color": step_color, "value": null}));
-    }
-    steps.extend(thresholds.steps.iter().map(|step| {
-        json!({
-            "color": color(&step.color),
-            "value": step.value,
-        })
-    }));
+    let resolved = ResolvedThresholds::from(thresholds);
     json!({
-        "mode": match thresholds.mode {
+        "mode": match resolved.mode() {
             ThresholdMode::Absolute => "absolute",
             ThresholdMode::Percentage => "percentage",
         },
-        "steps": steps,
+        "steps": resolved
+            .steps()
+            .map(|step| json!({"color": color(step.color()), "value": step.value()}))
+            .collect::<Vec<_>>(),
     })
 }
 

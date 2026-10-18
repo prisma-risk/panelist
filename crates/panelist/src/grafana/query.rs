@@ -23,7 +23,7 @@
 
 use std::collections::HashSet;
 
-use crate::{DataSource, PrometheusFormat, Query};
+use crate::{DataSource, Panel, PrometheusFormat, Query, resolved::ResolvedQuery};
 
 use super::layout::reference_id;
 use super::wire::GrafanaTarget;
@@ -52,16 +52,30 @@ pub(crate) fn effective_ref_ids(queries: &[Query]) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn normalize_targets(
-    queries: &[Query],
-    panel_datasource: Option<&DataSource>,
-) -> Vec<GrafanaTarget> {
-    let ref_ids = effective_ref_ids(queries);
+/// Pairs each of a panel's queries with its effective reference ID, the datasource it runs against, and the panel's minimum interval.
+pub(crate) fn resolve_queries<'a>(
+    panel: &'a Panel,
+    panel_datasource: Option<&'a DataSource>,
+) -> Vec<ResolvedQuery<'a>> {
+    let panel_min_interval = panel.query_options.min_interval.as_deref();
+    panel
+        .queries
+        .iter()
+        .zip(effective_ref_ids(&panel.queries))
+        .map(|(query, ref_id)| ResolvedQuery {
+            query,
+            ref_id,
+            datasource: query.options().datasource.as_ref().or(panel_datasource),
+            panel_min_interval,
+        })
+        .collect()
+}
 
+pub(crate) fn normalize_targets(queries: &[ResolvedQuery<'_>]) -> Vec<GrafanaTarget> {
     queries
         .iter()
-        .zip(ref_ids)
-        .map(|(query, ref_id)| {
+        .map(|resolved| {
+            let query = resolved.query();
             let options = query.options();
             let query_type = match query {
                 Query::Loki(_) => Some(if options.instant { "instant" } else { "range" }),
@@ -69,8 +83,8 @@ pub(crate) fn normalize_targets(
             };
 
             GrafanaTarget {
-                ref_id,
-                datasource: options.datasource.as_ref().or(panel_datasource).cloned(),
+                ref_id: resolved.ref_id().to_owned(),
+                datasource: resolved.datasource().cloned(),
                 expr: query.expression().to_owned(),
                 format: query.prometheus_format().map(|format| match format {
                     PrometheusFormat::TimeSeries => "time_series",
