@@ -25,13 +25,16 @@ use std::collections::BTreeMap;
 
 use crate::{Dashboard, DashboardItem, ValidationErrors};
 
+mod annotation;
 mod field;
 mod layout;
+mod link;
 mod panel;
 mod query;
 mod references;
 mod transform;
 mod validate;
+mod validate_options;
 mod variable;
 mod vocabulary;
 mod wire;
@@ -123,7 +126,13 @@ pub(crate) fn normalize(dashboard: &Dashboard) -> Result<NormalizedDashboard, Va
                 .map(|variable| normalize_variable(variable, dashboard.datasource.as_ref()))
                 .collect(),
         },
-        annotations: GrafanaAnnotations { list: Vec::new() },
+        annotations: GrafanaAnnotations {
+            list: annotation::normalize_annotations(
+                dashboard.built_in_annotation.as_ref(),
+                &dashboard.annotations,
+                dashboard.datasource.as_ref(),
+            ),
+        },
         refresh: dashboard.refresh.clone(),
         schema_version: dashboard.schema_version,
         version: dashboard.version,

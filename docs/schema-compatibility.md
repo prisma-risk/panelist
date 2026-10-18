@@ -98,7 +98,7 @@ valid JSON, not that Grafana kept what was in it. So for each golden,
    in the loop. A `blocked` report names the offending ancestor and the
    type it came back as.
 
-Both goldens round-tripped with **zero dropped, altered, retyped, or
+All three goldens round-tripped with **zero dropped, altered, retyped, or
 blocked properties**:
 
 - [`basic.json`](../crates/panelist/tests/golden/basic.json) (uid
@@ -121,6 +121,7 @@ blocked properties**:
   `heatmap` all exercised across the dashboard's queries), and typed heatmap
   options (color scheme, color steps, cell gap, calculate, and Y axis unit
   and placement).
+- [`panel_features.json`](../crates/panelist/tests/golden/panel_features.json) (uid `panel-features`, 224 leaf properties and 9 empty containers checked) — panel query options and time overrides (`interval`, `maxDataPoints`, `timeFrom`, `timeShift`, `hideTimeOverride`), horizontal and vertical panel repeats (`repeat`, `repeatDirection`, `maxPerRow`) and a row repeat, `value`, `range`, `regex`, and `special` value mappings with their `index`, panel header links and field data links in defaults and in an override, and an annotation list holding a configured built-in entry and two Prometheus annotation queries in the migrated `target` shape.
 
 Run `make verify-grafana` to reproduce this check locally. It needs Docker
 and network access, which is why it is not part of `make ci` or the CI

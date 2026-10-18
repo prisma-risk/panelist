@@ -51,11 +51,13 @@
 //! # Ok::<(), panelist::Error>(())
 //! ```
 
+mod annotation;
 mod dashboard;
 mod datasource;
 mod field;
 mod grafana;
 mod heatmap;
+mod link;
 mod macros;
 mod panel;
 mod query;
@@ -65,17 +67,19 @@ mod validation;
 mod variable;
 mod visualization;
 
+pub use annotation::{Annotation, BuiltInAnnotation, PrometheusAnnotation, RawAnnotation};
 pub use dashboard::{Dashboard, DashboardCursorSync, DashboardItem, DashboardLink, Row, TimeRange};
 pub use datasource::{DataSource, loki, prometheus};
 pub use field::{
     Color, ColorScheme, FieldConfig, FieldOverride, Legend, LegendMode, LegendPlacement,
-    OverrideMatcher, OverrideProperty, ThresholdMode, ThresholdStep, Thresholds, Unit,
-    ValueMapping,
+    OverrideMatcher, OverrideProperty, SpecialValue, ThresholdMode, ThresholdStep, Thresholds,
+    Unit, ValueMapping,
 };
 pub use heatmap::{HeatmapColorMode, HeatmapColorScheme};
+pub use link::{DataLink, DataLinkVariable};
 pub use panel::{
-    BarGauge, Gauge, GridPos, Heatmap, Panel, PanelBuilder, PanelKind, RawPanel, Stat, Table, Text,
-    TextMode, Timeseries,
+    BarGauge, Gauge, GridPos, Heatmap, HorizontalRepeat, Panel, PanelBuilder, PanelKind, RawPanel,
+    Repeat, Stat, Table, Text, TextMode, Timeseries, VerticalRepeat,
 };
 pub use query::{
     LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery,
@@ -107,15 +111,16 @@ pub mod __private {
 /// Common dashboard-authoring types, builders, helpers, and macros.
 pub mod prelude {
     pub use crate::{
-        AxisPlacement, BarGauge, BarGaugeDisplayMode, CellBackgroundMode, CellValueDisplay, Color,
-        ColorScheme, ColoredBackgroundCell, ConstantVariable, CustomVariable, Dashboard,
-        DashboardCursorSync, DashboardLink, DataSource, DataSourceVariable, FieldConfig,
-        FieldOverride, Gauge, GaugeCell, GridPos, Heatmap, HeatmapColorMode, HeatmapColorScheme,
-        JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, Legend, LegendMode,
-        LegendPlacement, LineInterpolation, LokiQuery, OrganizeFields, Orientation,
-        OverrideMatcher, OverrideProperty, Panel, PanelKind, PointVisibility, PrometheusFormat,
-        PrometheusQuery, Query, QueryEditorMode, QueryVariable, RawPanel, RawQuery,
-        RawTransformation, ReduceOptions, Reducer, Row, SortBy, SortDirection, SparklineCell,
+        Annotation, AxisPlacement, BarGauge, BarGaugeDisplayMode, BuiltInAnnotation,
+        CellBackgroundMode, CellValueDisplay, Color, ColorScheme, ColoredBackgroundCell,
+        ConstantVariable, CustomVariable, Dashboard, DashboardCursorSync, DashboardLink, DataLink,
+        DataLinkVariable, DataSource, DataSourceVariable, FieldConfig, FieldOverride, Gauge,
+        GaugeCell, GridPos, Heatmap, HeatmapColorMode, HeatmapColorScheme, JoinByField, JoinMode,
+        LabelsToFields, LabelsToFieldsMode, Legend, LegendMode, LegendPlacement, LineInterpolation,
+        LokiQuery, OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel,
+        PanelKind, PointVisibility, PrometheusAnnotation, PrometheusFormat, PrometheusQuery, Query,
+        QueryEditorMode, QueryVariable, RawAnnotation, RawPanel, RawQuery, RawTransformation,
+        ReduceOptions, Reducer, Repeat, Row, SortBy, SortDirection, SparklineCell, SpecialValue,
         Stacking, StackingMode, Stat, StatColorMode, StatGraphMode, Table, TableCell,
         TableCellType, Text, TextMode, ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable,
         Timeseries, Tooltip, TooltipMode, TooltipSort, Transformation, Unit, ValueMapping,

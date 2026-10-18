@@ -1038,3 +1038,470 @@ fn a_fully_specified_query_target_is_exact() {
         })
     );
 }
+
+// ---------------------------------------------------------------------------
+// Value mappings
+//
+// packages/grafana-data/src/types/valueMapping.ts for each `options` shape, and `editModelToSaveModel` in public/app/features/dimensions/editors/ValueMappingsEditor/ValueMappingsEditorModal.tsx for the ordering: one leading `value` entry holding every exact value, the other kinds in authored order, and each result stamped with its row index.
+// ---------------------------------------------------------------------------
+
+fn mappings_of(panel: impl Into<Panel>) -> Value {
+    let dashboard = Dashboard::new("Mappings").panel(panel);
+    panel_of(&dashboard)["fieldConfig"]["defaults"]["mappings"].clone()
+}
+
+#[test]
+fn every_value_mapping_kind_emits_its_grafana_options_shape() {
+    let mappings = mappings_of(
+        Stat::new("Status")
+            .query(PrometheusQuery::new("up"))
+            .mapping(ValueMapping::range(None, 0.5).text("Low").color(Color::Red))
+            .mapping(ValueMapping::value("1").text("Up").color(Color::Green))
+            .mapping(ValueMapping::regex("^prod-(.*)$").text("$1"))
+            .mapping(ValueMapping::special(SpecialValue::Null).text("No data"))
+            .mapping(ValueMapping::value("0").text("Down"))
+            .mapping(ValueMapping::range(0.5, 2.0).color(Color::Yellow)),
+    );
+
+    assert_eq!(
+        mappings,
+        json!([
+            {
+                "type": "value",
+                "options": {
+                    "0": {"text": "Down", "index": 4},
+                    "1": {"text": "Up", "color": "green", "index": 1},
+                },
+            },
+            {
+                "type": "range",
+                "options": {"from": null, "to": 0.5, "result": {"text": "Low", "color": "red", "index": 0}},
+            },
+            {
+                "type": "regex",
+                "options": {"pattern": "^prod-(.*)$", "result": {"text": "$1", "index": 2}},
+            },
+            {
+                "type": "special",
+                "options": {"match": "null", "result": {"text": "No data", "index": 3}},
+            },
+            {
+                "type": "range",
+                "options": {"from": 0.5, "to": 2.0, "result": {"color": "yellow", "index": 5}},
+            },
+        ])
+    );
+}
+
+#[test]
+fn every_special_value_emits_its_grafana_match_name() {
+    for (special, name) in [
+        (SpecialValue::Null, "null"),
+        (SpecialValue::NaN, "nan"),
+        (SpecialValue::NullOrNaN, "null+nan"),
+        (SpecialValue::True, "true"),
+        (SpecialValue::False, "false"),
+        (SpecialValue::Empty, "empty"),
+    ] {
+        let mappings = mappings_of(
+            Stat::new("Status")
+                .query(PrometheusQuery::new("up"))
+                .mapping(ValueMapping::special(special).text("x")),
+        );
+        assert_eq!(
+            mappings,
+            json!([{"type": "special", "options": {"match": name, "result": {"text": "x", "index": 0}}}])
+        );
+    }
+}
+
+#[test]
+fn blank_mapping_text_is_omitted_like_grafanas_editor_does() {
+    let mappings = mappings_of(
+        Stat::new("Status")
+            .query(PrometheusQuery::new("up"))
+            .mapping(ValueMapping::value("1").text("  ").color(Color::Green)),
+    );
+
+    assert_eq!(
+        mappings,
+        json!([{"type": "value", "options": {"1": {"color": "green", "index": 0}}}])
+    );
+}
+
+#[test]
+fn override_mappings_and_links_collect_into_one_property_each() {
+    let dashboard = Dashboard::new("Overrides").panel(
+        Table::new("Routes")
+            .query(PrometheusQuery::new("up"))
+            .override_field(
+                FieldOverride::by_name("status")
+                    .mapping(ValueMapping::value("0").text("Down"))
+                    .data_link(DataLink::new("Runbook", "https://runbook.example/status"))
+                    .mapping(ValueMapping::special(SpecialValue::Null).text("Unknown"))
+                    .data_link(DataLink::new("Logs", "/explore").target_blank(true)),
+            ),
+    );
+
+    assert_eq!(
+        panel_of(&dashboard)["fieldConfig"]["overrides"][0]["properties"],
+        json!([
+            {
+                "id": "mappings",
+                "value": [
+                    {"type": "value", "options": {"0": {"text": "Down", "index": 0}}},
+                    {"type": "special", "options": {"match": "null", "result": {"text": "Unknown", "index": 1}}},
+                ],
+            },
+            {
+                "id": "links",
+                "value": [
+                    {"title": "Runbook", "url": "https://runbook.example/status"},
+                    {"title": "Logs", "url": "/explore", "targetBlank": true},
+                ],
+            },
+        ])
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Data links
+//
+// packages/grafana-data/src/types/dataLink.ts for the stored shape, and `getDataLinkUIModel` in public/app/features/panel/panellinks/link_srv.ts, which renders panel header links and field links alike from `title`, `url`, and `targetBlank` only.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn panel_and_field_links_emit_the_data_link_shape() {
+    let dashboard = Dashboard::new("Links").panel(
+        Timeseries::new("Requests")
+            .query(PrometheusQuery::new("up"))
+            .link(DataLink::new("Runbook", "https://runbook.example/api"))
+            .data_link(
+                DataLink::new(
+                    "Instance",
+                    format!(
+                        "/d/instance?var-instance={}",
+                        DataLinkVariable::FieldLabel("instance".into())
+                    ),
+                )
+                .target_blank(true),
+            ),
+    );
+    let panel = panel_of(&dashboard);
+
+    assert_eq!(
+        panel["links"],
+        json!([{"title": "Runbook", "url": "https://runbook.example/api"}])
+    );
+    assert_eq!(
+        panel["fieldConfig"]["defaults"]["links"],
+        json!([{
+            "title": "Instance",
+            "url": "/d/instance?var-instance=${__field.labels.instance}",
+            "targetBlank": true,
+        }])
+    );
+}
+
+/// `getLinkUrl` and `urlUtil.appendQueryToUrl` (packages/grafana-data/src/utils/url.ts): time range first, then variables, joined with `?` or `&` as the URL needs.
+#[test]
+fn keep_time_and_include_vars_append_grafanas_url_parameters() {
+    let cases = [
+        ("/d/api", "/d/api?$__url_time_range&$__all_variables"),
+        ("/d/api?", "/d/api?$__url_time_range&$__all_variables"),
+        (
+            "/d/api?orgId=1",
+            "/d/api?orgId=1&$__url_time_range&$__all_variables",
+        ),
+    ];
+    for (url, expected) in cases {
+        let dashboard = Dashboard::new("Links").panel(
+            Stat::new("Up").query(PrometheusQuery::new("up")).link(
+                DataLink::new("Detail", url)
+                    .include_vars(true)
+                    .keep_time(true),
+            ),
+        );
+        assert_eq!(
+            panel_of(&dashboard)["links"][0]["url"],
+            json!(expected),
+            "{url}"
+        );
+    }
+}
+
+#[test]
+fn every_data_link_variable_renders_grafanas_reference() {
+    for (variable, expected) in [
+        (DataLinkVariable::TimeRange, "${__url_time_range}"),
+        (DataLinkVariable::From, "${__from}"),
+        (DataLinkVariable::To, "${__to}"),
+        (DataLinkVariable::AllVariables, "${__all_variables}"),
+        (DataLinkVariable::SeriesName, "${__series.name}"),
+        (DataLinkVariable::FieldName, "${__field.name}"),
+        (DataLinkVariable::FieldDisplayName, "${__field.displayName}"),
+        (
+            DataLinkVariable::FieldLabel("job".into()),
+            "${__field.labels.job}",
+        ),
+        (
+            DataLinkVariable::FieldLabel("service.name".into()),
+            "${__field.labels[\"service.name\"]}",
+        ),
+        (DataLinkVariable::ValueTime, "${__value.time}"),
+        (DataLinkVariable::ValueNumeric, "${__value.numeric}"),
+        (DataLinkVariable::ValueText, "${__value.text}"),
+        (DataLinkVariable::ValueRaw, "${__value.raw}"),
+        (DataLinkVariable::ValueCalc, "${__value.calc}"),
+        (
+            DataLinkVariable::DataField("route".into()),
+            "${__data.fields.route}",
+        ),
+        (
+            DataLinkVariable::DataField("Value #A".into()),
+            "${__data.fields[\"Value #A\"]}",
+        ),
+        (
+            DataLinkVariable::Dashboard("instance".into()),
+            "${instance}",
+        ),
+    ] {
+        assert_eq!(variable.to_string(), expected);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Panel query options and repeats
+//
+// `#Panel` and `#RowPanel` in kinds/dashboard/dashboard_kind.cue.
+// ---------------------------------------------------------------------------
+
+fn instance_variable() -> CustomVariable {
+    CustomVariable::new("instance", ["a", "b"])
+}
+
+#[test]
+fn panel_query_options_emit_their_classic_keys_and_nothing_when_unset() {
+    let bare =
+        Dashboard::new("Options").panel(Timeseries::new("Rate").query(PrometheusQuery::new("up")));
+    let bare = panel_of(&bare);
+    for key in [
+        "interval",
+        "maxDataPoints",
+        "timeFrom",
+        "timeShift",
+        "hideTimeOverride",
+        "repeat",
+        "repeatDirection",
+        "maxPerRow",
+    ] {
+        assert!(bare.get(key).is_none(), "{key} should be omitted");
+    }
+
+    let set = Dashboard::new("Options").panel(
+        Timeseries::new("Rate")
+            .query(PrometheusQuery::new("up"))
+            .min_interval("1m")
+            .max_data_points(500)
+            .time_from("24h")
+            .time_shift("1d/d")
+            .hide_time_override(true),
+    );
+    let set = panel_of(&set);
+    assert_eq!(set["interval"], json!("1m"));
+    assert_eq!(set["maxDataPoints"], json!(500));
+    assert_eq!(set["timeFrom"], json!("24h"));
+    assert_eq!(set["timeShift"], json!("1d/d"));
+    assert_eq!(set["hideTimeOverride"], json!(true));
+}
+
+#[test]
+fn panel_repeats_emit_direction_and_max_per_row_like_grafana_saves_them() {
+    let shape = |repeat: Repeat| {
+        let dashboard = Dashboard::new("Repeat")
+            .variable(instance_variable())
+            .panel(
+                Stat::new("Up")
+                    .query(PrometheusQuery::new("up"))
+                    .repeat(repeat),
+            );
+        let panel = panel_of(&dashboard);
+        json!({
+            "repeat": panel["repeat"],
+            "repeatDirection": panel["repeatDirection"],
+            "maxPerRow": panel["maxPerRow"],
+        })
+    };
+
+    assert_eq!(
+        shape("instance".into()),
+        json!({"repeat": "instance", "repeatDirection": "h", "maxPerRow": null})
+    );
+    assert_eq!(
+        shape(Repeat::horizontal("instance").max_per_row(3).into()),
+        json!({"repeat": "instance", "repeatDirection": "h", "maxPerRow": 3})
+    );
+    assert_eq!(
+        shape(Repeat::vertical("instance").into()),
+        json!({"repeat": "instance", "repeatDirection": "v", "maxPerRow": null})
+    );
+}
+
+#[test]
+fn a_repeated_row_emits_only_the_variable_name() {
+    let dashboard = Dashboard::new("Repeat").variable(instance_variable()).row(
+        Row::new("Per instance")
+            .repeat("instance")
+            .panel(Stat::new("Up").query(PrometheusQuery::new("up"))),
+    );
+    let row = panel_of(&dashboard);
+
+    assert_eq!(row["type"], json!("row"));
+    assert_eq!(row["repeat"], json!("instance"));
+    assert!(row.get("repeatDirection").is_none());
+    assert!(row.get("maxPerRow").is_none());
+}
+
+/// Grafana 13's `transformSaveModelToScene` and `DashboardGridItem` force a horizontally repeated panel to 24 columns, so Panelist reserves the full row: the next panel starts below it instead of beside it.
+#[test]
+fn a_horizontal_repeat_reserves_the_full_row_and_a_vertical_one_keeps_its_width() {
+    let dashboard = Dashboard::new("Repeat")
+        .variable(instance_variable())
+        .panel(
+            Stat::new("Before")
+                .query(PrometheusQuery::new("up"))
+                .width(6),
+        )
+        .panel(
+            Stat::new("Across")
+                .query(PrometheusQuery::new("up"))
+                .width(6)
+                .repeat("instance"),
+        )
+        .panel(
+            Stat::new("After")
+                .query(PrometheusQuery::new("up"))
+                .width(6),
+        )
+        .panel(
+            Stat::new("Down")
+                .query(PrometheusQuery::new("up"))
+                .width(6)
+                .repeat(Repeat::vertical("instance")),
+        );
+    let json = as_value(&dashboard);
+    let grid = |index: usize| json["panels"][index]["gridPos"].clone();
+
+    assert_eq!(grid(0), json!({"x": 0, "y": 0, "w": 6, "h": 6}));
+    assert_eq!(grid(1), json!({"x": 0, "y": 6, "w": 24, "h": 6}));
+    assert_eq!(grid(2), json!({"x": 0, "y": 12, "w": 6, "h": 6}));
+    assert_eq!(grid(3), json!({"x": 6, "y": 12, "w": 6, "h": 6}));
+}
+
+// ---------------------------------------------------------------------------
+// Annotations
+//
+// `#AnnotationQuery` in kinds/dashboard/dashboard_kind.cue; the Prometheus shape is what `prepareAnnotation` in packages/grafana-prometheus/src/annotations.ts migrates to; the built-in entry is `addBuiltInAnnotationQuery` in public/app/features/dashboard/state/DashboardModel.ts.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_annotations_emit_an_empty_list() {
+    assert_eq!(
+        as_value(&Dashboard::new("Plain"))["annotations"],
+        json!({"list": []})
+    );
+}
+
+#[test]
+fn a_prometheus_annotation_emits_the_migrated_target_shape() {
+    let dashboard = Dashboard::new("Annotations")
+        .datasource(prometheus("prometheus-main"))
+        .annotation(
+            PrometheusAnnotation::new("Restarts", "changes(process_start_time_seconds[2m]) > 0")
+                .step("60s")
+                .title_format("Restart")
+                .text_format("{{instance}}")
+                .tag_keys(["job", "instance"])
+                .use_value_for_time(true)
+                .icon_color(Color::Orange)
+                .hide(true)
+                .enable(false),
+        )
+        .annotation(
+            PrometheusAnnotation::new("Bare", "up == 0").datasource(prometheus("prometheus-other")),
+        );
+
+    assert_eq!(
+        as_value(&dashboard)["annotations"]["list"],
+        json!([
+            {
+                "name": "Restarts",
+                "datasource": {"type": "prometheus", "uid": "prometheus-main"},
+                "enable": false,
+                "hide": true,
+                "iconColor": "orange",
+                "target": {
+                    "expr": "changes(process_start_time_seconds[2m]) > 0",
+                    "interval": "60s",
+                    "refId": "Anno",
+                },
+                "titleFormat": "Restart",
+                "textFormat": "{{instance}}",
+                "tagKeys": "job,instance",
+                "useValueForTime": true,
+            },
+            {
+                "name": "Bare",
+                "datasource": {"type": "prometheus", "uid": "prometheus-other"},
+                "enable": true,
+                "hide": false,
+                "iconColor": "red",
+                "target": {"expr": "up == 0", "refId": "Anno"},
+            },
+        ])
+    );
+}
+
+#[test]
+fn a_raw_annotation_flattens_its_fields_over_the_common_keys() {
+    let dashboard = Dashboard::new("Annotations").annotation(
+        RawAnnotation::new("Deploys")
+            .datasource(loki("loki-main"))
+            .field("expr", json!("{job=\"deployer\"}"))
+            .field("iconColor", json!("purple")),
+    );
+
+    assert_eq!(
+        as_value(&dashboard)["annotations"]["list"],
+        json!([{
+            "name": "Deploys",
+            "datasource": {"type": "loki", "uid": "loki-main"},
+            "enable": true,
+            "hide": false,
+            "iconColor": "purple",
+            "expr": "{job=\"deployer\"}",
+        }])
+    );
+}
+
+#[test]
+fn a_configured_built_in_annotation_comes_first_with_grafanas_identity() {
+    let dashboard = Dashboard::new("Annotations")
+        .annotation(PrometheusAnnotation::new("Restarts", "up == 0"))
+        .built_in_annotation(BuiltInAnnotation::new().enable(false));
+    let list = as_value(&dashboard)["annotations"]["list"].clone();
+
+    assert_eq!(
+        list[0],
+        json!({
+            "builtIn": 1,
+            "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": false,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard",
+        })
+    );
+    assert_eq!(list[1]["name"], json!("Restarts"));
+}

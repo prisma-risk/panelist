@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::{Reducer, TableCell, TableCellType};
+use crate::{DataLink, Reducer, TableCell, TableCellType};
 
 /// A Grafana field unit with common units represented as Rust variants.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -98,23 +98,108 @@ impl Color {
     }
 }
 
-/// Display text and optional color substituted for one exact field value.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A Grafana value mapping: display text and an optional color substituted for the field values it matches.
+///
+/// Each constructor picks one of Grafana's four mapping kinds, and each kind carries only the match it needs: an exact value, a numeric range, a regular expression, or a [`SpecialValue`]. The result is set with [`ValueMapping::text`] and [`ValueMapping::color`]; a mapping must set at least one of them.
+///
+/// Grafana evaluates mappings in array order and stops at the first match. Panelist lowers mappings the way Grafana's own mapping editor saves them: every exact-value mapping joins one leading `value` entry, followed by the range, regex, and special mappings in authored order. Exact values therefore always take precedence over the other kinds, and each result records its authored position as `index`, which the editor uses to show the rows in the order they were written.
+///
+/// ```rust
+/// use panelist::prelude::*;
+///
+/// let stat = Stat::new("Status")
+///     .mapping(ValueMapping::value("1").text("Up").color(Color::Green))
+///     .mapping(ValueMapping::range(0.0, 0.5).text("Degraded").color(Color::Yellow))
+///     .mapping(ValueMapping::regex("^prod-(.*)$").text("$1"))
+///     .mapping(ValueMapping::special(SpecialValue::Null).text("No data"));
+/// # let _ = stat;
+/// ```
+#[derive(Debug, Clone, PartialEq)]
 pub struct ValueMapping {
-    pub(crate) value: String,
-    pub(crate) text: String,
+    pub(crate) matcher: ValueMatch,
+    pub(crate) text: Option<String>,
     pub(crate) color: Option<Color>,
 }
 
+/// The match half of a [`ValueMapping`], one variant per Grafana mapping type.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ValueMatch {
+    /// Grafana `value`: one exact value, compared as a string.
+    Value(String),
+    /// Grafana `range`: an inclusive numeric range. `None` is an open end.
+    Range { from: Option<f64>, to: Option<f64> },
+    /// Grafana `regex`: a regular expression matched against string values.
+    Regex(String),
+    /// Grafana `special`.
+    Special(SpecialValue),
+}
+
+/// A value Grafana's `special` mapping type matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecialValue {
+    /// A null or missing value (`null`).
+    Null,
+    /// A numeric NaN (`nan`).
+    NaN,
+    /// Either a null value or a NaN (`null+nan`).
+    NullOrNaN,
+    /// A boolean `true` or the string `"true"` (`true`).
+    True,
+    /// A boolean `false` or the string `"false"` (`false`).
+    False,
+    /// An empty string (`empty`).
+    Empty,
+}
+
 impl ValueMapping {
-    /// Maps an exact Grafana field value to display text.
-    #[must_use]
-    pub fn new(value: impl Into<String>, text: impl Into<String>) -> Self {
+    fn matching(matcher: ValueMatch) -> Self {
         Self {
-            value: value.into(),
-            text: text.into(),
+            matcher,
+            text: None,
             color: None,
         }
+    }
+
+    /// Matches one exact field value.
+    ///
+    /// Grafana looks the value up as a string, so a numeric field value `1` matches `"1"`.
+    #[must_use]
+    pub fn value(value: impl Into<String>) -> Self {
+        Self::matching(ValueMatch::Value(value.into()))
+    }
+
+    /// Matches numeric values between `from` and `to`, both inclusive.
+    ///
+    /// `None` leaves that end open, so `ValueMapping::range(90.0, None)` matches every value of at least 90. At least one end must be set, both must be finite, and `from` must not exceed `to`.
+    #[must_use]
+    pub fn range(from: impl Into<Option<f64>>, to: impl Into<Option<f64>>) -> Self {
+        Self::matching(ValueMatch::Range {
+            from: from.into(),
+            to: to.into(),
+        })
+    }
+
+    /// Matches string values against a regular expression.
+    ///
+    /// The display text may reference capture groups: with the pattern `^prod-(.*)$`, the text `$1` displays `api` for the value `prod-api`. Grafana skips this mapping for non-string values.
+    #[must_use]
+    pub fn regex(pattern: impl Into<String>) -> Self {
+        Self::matching(ValueMatch::Regex(pattern.into()))
+    }
+
+    /// Matches null, NaN, boolean, or empty values.
+    #[must_use]
+    pub fn special(value: SpecialValue) -> Self {
+        Self::matching(ValueMatch::Special(value))
+    }
+
+    /// Sets the text displayed instead of the matched value.
+    ///
+    /// Blank text is omitted from the JSON, as Grafana's mapping editor does, so the original value keeps displaying.
+    #[must_use]
+    pub fn text(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
+        self
     }
 
     /// Colors the mapped result.
@@ -222,6 +307,7 @@ pub struct FieldConfig {
     pub(crate) color: Option<ColorScheme>,
     pub(crate) thresholds: Option<Thresholds>,
     pub(crate) mappings: Vec<ValueMapping>,
+    pub(crate) links: Vec<DataLink>,
     pub(crate) custom: BTreeMap<String, Value>,
     pub(crate) overrides: Vec<FieldOverride>,
 }
@@ -282,10 +368,17 @@ impl FieldConfig {
         self
     }
 
-    /// Adds an exact-value display mapping.
+    /// Adds a value mapping.
     #[must_use]
     pub fn mapping(mut self, mapping: ValueMapping) -> Self {
         self.mappings.push(mapping);
+        self
+    }
+
+    /// Adds a data link shown when a viewer clicks a field value.
+    #[must_use]
+    pub fn data_link(mut self, link: DataLink) -> Self {
+        self.links.push(link);
         self
     }
 
@@ -350,6 +443,10 @@ pub enum OverrideProperty {
     Thresholds(Thresholds),
     /// Override the table cell renderer.
     Cell(TableCell),
+    /// Replace the value mappings of the selected fields.
+    Mappings(Vec<ValueMapping>),
+    /// Replace the data links of the selected fields.
+    Links(Vec<DataLink>),
     /// Explicit Grafana property escape hatch.
     Custom {
         /// Grafana field-property identifier.
@@ -495,6 +592,38 @@ impl FieldOverride {
     #[must_use]
     pub fn cell_type(self, cell_type: TableCellType) -> Self {
         self.cell(cell_type)
+    }
+
+    /// Adds a value mapping for the selected fields.
+    ///
+    /// Grafana's `mappings` override replaces the default mappings wholesale rather than merging with them. Repeated calls collect into that one property, so the selected fields get exactly the mappings added here.
+    #[must_use]
+    pub fn mapping(mut self, mapping: ValueMapping) -> Self {
+        if let Some(OverrideProperty::Mappings(mappings)) = self
+            .properties
+            .iter_mut()
+            .find(|property| matches!(property, OverrideProperty::Mappings(_)))
+        {
+            mappings.push(mapping);
+            return self;
+        }
+        self.property(OverrideProperty::Mappings(vec![mapping]))
+    }
+
+    /// Adds a data link for the selected fields.
+    ///
+    /// Grafana's `links` override replaces the default links wholesale rather than merging with them. Repeated calls collect into that one property, so the selected fields get exactly the links added here.
+    #[must_use]
+    pub fn data_link(mut self, link: DataLink) -> Self {
+        if let Some(OverrideProperty::Links(links)) = self
+            .properties
+            .iter_mut()
+            .find(|property| matches!(property, OverrideProperty::Links(_)))
+        {
+            links.push(link);
+            return self;
+        }
+        self.property(OverrideProperty::Links(vec![link]))
     }
 }
 

@@ -340,6 +340,103 @@ fn route_performance_matches_the_committed_golden_file() {
     assert_eq!(actual, expected);
 }
 
+/// Repeats, panel query options and time overrides, every value mapping kind, panel and field data links, and annotations. `make verify-grafana` round-trips this golden too, which is what proves Grafana keeps each of these keys.
+fn panel_features_dashboard() -> Dashboard {
+    dashboard! {
+        title: "Panel features";
+        uid: "panel-features";
+        datasource: prometheus("prometheus-main");
+        built_in_annotation: BuiltInAnnotation::new().enable(false);
+
+        variable "job" {
+            values: ["api", "checkout"];
+            default: "api";
+        }
+
+        variable "instance" {
+            query: promql!("label_values(up{job=\"$job\"}, instance)");
+            multi: true;
+            include_all: true;
+        }
+
+        annotation "Restarts" => "changes(process_start_time_seconds{job=\"$job\"}[2m]) > 0" {
+            step: "60s";
+            title_format: "Restart";
+            text_format: "{{instance}} restarted";
+            tag_keys: ["job", "instance"];
+            icon_color: orange;
+        }
+
+        annotation "Scrape failures" => "up{job=\"$job\"} == 0" {
+            enable: false;
+            hide: true;
+            use_value_for_time: false;
+        }
+
+        row "Overview" {
+            stat "Availability" {
+                query: promql!("avg(up{job=\"$job\"})");
+                width: 8;
+                time_from: "24h";
+                hide_time_override: true;
+                mapping "1" => "Up" { color: green; }
+                mapping range(0.0, 0.99) => "Degraded" { color: yellow; }
+                mapping special(null) => "No data";
+                link "Runbook" => "https://runbook.example/api" { target_blank: true; }
+            }
+
+            timeseries "Requests, last week" {
+                query: promql!("sum(rate(http_requests_total{job=\"$job\"}[$__rate_interval]))");
+                width: 16;
+                min_interval: "1m";
+                max_data_points: 500;
+                time_shift: "7d";
+            }
+        }
+
+        row "Per instance" {
+            repeat: "job";
+
+            timeseries "Requests on $instance" {
+                query: promql!("sum(rate(http_requests_total{instance=\"$instance\"}[$__rate_interval]))");
+                repeat: horizontal("instance", 3);
+                data_link "Instance logs" => "/explore?instance=${__field.labels.instance}" {
+                    keep_time: true;
+                }
+            }
+
+            table "Status on $instance" {
+                query: promql!("up{instance=\"$instance\"}") {
+                    format: table;
+                    instant: true;
+                }
+                repeat: vertical("instance");
+                mapping regex("^(.*):\\d+$") => "$1";
+                mapping special(empty) => "-";
+
+                override field("Value") {
+                    data_link "Targets" => "/targets?instance=${__data.fields.instance}" {
+                        target_blank: true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_features_match_the_committed_golden_file() {
+    let actual = format!("{}\n", panel_features_dashboard().to_json_pretty().unwrap());
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/panel_features.json");
+
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        fs::write(&path, &actual).unwrap();
+    }
+
+    let expected = fs::read_to_string(path).unwrap();
+    assert_eq!(actual, expected);
+}
+
 // ---------------------------------------------------------------------------
 // The "no raw Grafana JSON" guard.
 //
@@ -724,7 +821,7 @@ let name = "Value #A";
         ),
         (
             "a value mapping",
-            r###"Stat::new("S").mapping(ValueMapping::new("0", "Down"))"###,
+            r###"Stat::new("S").mapping(ValueMapping::value("0").text("Down"))"###,
         ),
     ] {
         assert!(

@@ -289,6 +289,48 @@ let dashboard = dashboard! {
 # let _ = dashboard;
 ```
 
+Repeats, time overrides, value mappings, data links, and annotations are one line each:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "API";
+    datasource: prometheus("prometheus-main");
+
+    variable "instance" {
+        query: promql!("label_values(up{job=\"api\"}, instance)");
+        multi: true;
+    }
+
+    annotation "Restarts" => "changes(process_start_time_seconds{job=\"api\"}[2m]) > 0" {
+        text_format: "{{instance}} restarted";
+        icon_color: orange;
+    }
+
+    stat "Up on $instance" {
+        query: promql!("up{instance=\"$instance\"}");
+        repeat: horizontal("instance", 4);
+        time_from: "1h";
+        min_interval: "30s";
+
+        mapping "1" => "Up" { color: green; }
+        mapping range(0.0, 0.5) => "Degraded" { color: yellow; }
+        mapping special(null) => "No data";
+
+        link "Runbook" => "https://runbook.example/api";
+        data_link "Logs" => "/explore?instance=${__field.labels.instance}" {
+            keep_time: true;
+        }
+    }
+};
+# let _ = dashboard;
+```
+
+Grafana expands a repeat when the dashboard loads, so Panelist lays out the authored panel once. A horizontal repeat always spans the full row, because Grafana stretches it to 24 columns and splits that row between the clones, `max_per_row` at a time (4 by default). A vertical repeat keeps the panel's width. `Row::repeat` repeats a whole row. Repeating by a variable the dashboard does not declare is a validation error.
+
+Value mappings come in Grafana's four kinds: exact `value`, numeric `range`, `regex`, and `special` (null, NaN, null or NaN, true, false, empty). Panelist emits them the way Grafana's mapping editor saves them, so exact values take precedence over the other kinds. `link` adds a link to the panel header and `data_link` adds one to the field values; both are Grafana data links, and `DataLinkVariable` spells the built-in `${__value.raw}`-style variables. `annotation` adds a typed Prometheus annotation query, and `RawAnnotation` covers other datasources.
+
 ## Builder API
 
 Every important DSL construct has a normal Rust equivalent for IDE discovery,
@@ -318,8 +360,9 @@ The typed API covers:
 - Prometheus and Loki queries, including time-series, table, and heatmap
   result formats;
 - datasource, query, custom, and constant variables;
-- field defaults, value mappings, thresholds, legends, overrides, and field
-  matchers;
+- field defaults, value, range, regex, and special value mappings, field data links, thresholds, legends, overrides, and field matchers;
+- panel repeats, row repeats, query options, and relative time overrides;
+- Prometheus annotation queries and Grafana's built-in annotation entry;
 - transformations, table cells and sorting, heatmaps, and the common options
   for stat, time-series, gauge, and bar-gauge panels.
 
@@ -426,6 +469,8 @@ or expressions, invalid widths and positions, zero heights, and malformed
 threshold ordering. Invalid authored dashboards return errors instead of
 panicking.
 
+It also rejects repeats by undeclared variables, malformed minimum intervals and time overrides, value mappings that can never match or change nothing, duplicate exact-value mappings, and annotations without a name or expression.
+
 ### Variable references
 
 Validation also checks that every template variable a dashboard references is declared. Grafana leaves an unresolved reference in place, so a typo like `$enviroment` reaches the datasource verbatim and the panel just shows no data. Panelist reports it as `ValidationError::UnknownVariableReference`, naming the dashboard, panel or variable, the field, and the name.
@@ -491,12 +536,10 @@ screenshots from that stack, so an image cannot drift from its example.
 
 - Wire `scripts/verify-grafana.sh` (`make verify-grafana`) into CI so every
   change is validated against a live Grafana 13 instance automatically; the
-  check itself already exists and round-trips both golden dashboards
+  check itself already exists and round-trips every golden dashboard
   cleanly today, it just isn't triggered on every push yet.
 - Add an opt-in Grafana V2 resource serializer and dynamic layouts.
-- Add annotations, range/regex value mappings, and data links; add more
-  transformation types beyond the five modeled today (join, sort, organize,
-  time-series-to-table, labels-to-fields).
+- Add more transformation types beyond the five modeled today (join, sort, organize, time-series-to-table, labels-to-fields).
 - Add more datasource query types without turning the core crate into an API
   client.
 - Stabilize the API from real-world dashboard authoring feedback.

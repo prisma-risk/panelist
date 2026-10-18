@@ -27,6 +27,7 @@ HEALTH_POLL_INTERVAL_SECONDS=2
 GOLDEN_FILES=(
   "${REPO_ROOT}/crates/panelist/tests/golden/basic.json"
   "${REPO_ROOT}/crates/panelist/tests/golden/route_performance.json"
+  "${REPO_ROOT}/crates/panelist/tests/golden/panel_features.json"
 )
 
 WORK_DIR="$(mktemp -d)"

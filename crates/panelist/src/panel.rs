@@ -26,7 +26,7 @@ use std::{collections::BTreeMap, marker::PhantomData};
 use serde_json::Value;
 
 use crate::{
-    AxisPlacement, BarGaugeDisplayMode, ColorScheme, DashboardLink, DataSource, FieldConfig,
+    AxisPlacement, BarGaugeDisplayMode, ColorScheme, DataLink, DataSource, FieldConfig,
     FieldOverride, HeatmapColorMode, HeatmapColorScheme, Legend, LineInterpolation, Orientation,
     PointVisibility, Query, ReduceOptions, SortDirection, Stacking, StatColorMode, StatGraphMode,
     TableCell, Thresholds, Tooltip, Transformation, Unit, ValueMapping,
@@ -95,6 +95,122 @@ pub enum TextMode {
     Code,
 }
 
+/// How Grafana repeats a panel once per selected value of a dashboard variable.
+///
+/// Grafana expands repeats when the dashboard loads, so Panelist lays out and emits the authored panel once. The two directions treat the panel's size differently, following Grafana 13's `DashboardGridItem`:
+///
+/// - [`Repeat::horizontal`] always spans the full 24-column row, whatever the panel's width. Grafana splits that row evenly between the clones, at most `max_per_row` per line (4 when unset), and wraps the rest onto further lines of the authored height. Panelist reserves the full row for the panel, so the next panel starts on a new line, just as it does in Grafana. An explicit [`GridPos`] is emitted as written.
+/// - [`Repeat::vertical`] keeps the panel's width and stacks the clones below each other.
+///
+/// Either way, Grafana pushes the panels below a repeat further down as clones appear. The `gridPos` Panelist emits for those panels is their position before expansion.
+///
+/// ```rust
+/// use panelist::prelude::*;
+///
+/// let per_instance = Timeseries::new("Requests on $instance")
+///     .repeat(Repeat::horizontal("instance").max_per_row(3));
+/// let stacked = Stat::new("Errors on $instance").repeat(Repeat::vertical("instance"));
+/// # let _ = (per_instance, stacked);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Repeat {
+    /// Clones side by side across the row.
+    Horizontal(HorizontalRepeat),
+    /// Clones stacked down the dashboard.
+    Vertical(VerticalRepeat),
+}
+
+impl Repeat {
+    /// Repeats side by side for each value of the named variable.
+    ///
+    /// The name is the bare variable name, `instance` rather than `$instance`.
+    #[must_use]
+    pub fn horizontal(variable: impl Into<String>) -> HorizontalRepeat {
+        HorizontalRepeat {
+            variable: variable.into(),
+            max_per_row: None,
+        }
+    }
+
+    /// Repeats vertically for each value of the named variable.
+    ///
+    /// The name is the bare variable name, `instance` rather than `$instance`.
+    #[must_use]
+    pub fn vertical(variable: impl Into<String>) -> VerticalRepeat {
+        VerticalRepeat {
+            variable: variable.into(),
+        }
+    }
+
+    /// Returns the name of the variable the panel repeats by.
+    #[must_use]
+    pub fn variable(&self) -> &str {
+        match self {
+            Self::Horizontal(repeat) => &repeat.variable,
+            Self::Vertical(repeat) => &repeat.variable,
+        }
+    }
+}
+
+/// A horizontal [`Repeat`], the direction Grafana uses by default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HorizontalRepeat {
+    pub(crate) variable: String,
+    pub(crate) max_per_row: Option<u8>,
+}
+
+impl HorizontalRepeat {
+    /// Caps how many clones share one line, between 1 and 24. Grafana's editor offers 2, 3, 4, 6, 8, and 12, and defaults to 4.
+    #[must_use]
+    pub fn max_per_row(mut self, max_per_row: u8) -> Self {
+        self.max_per_row = Some(max_per_row);
+        self
+    }
+}
+
+/// A vertical [`Repeat`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerticalRepeat {
+    pub(crate) variable: String,
+}
+
+impl From<HorizontalRepeat> for Repeat {
+    fn from(value: HorizontalRepeat) -> Self {
+        Self::Horizontal(value)
+    }
+}
+
+impl From<VerticalRepeat> for Repeat {
+    fn from(value: VerticalRepeat) -> Self {
+        Self::Vertical(value)
+    }
+}
+
+/// A bare variable name repeats horizontally, Grafana's default direction.
+impl From<&str> for Repeat {
+    fn from(value: &str) -> Self {
+        Self::horizontal(value).into()
+    }
+}
+
+/// A bare variable name repeats horizontally, Grafana's default direction.
+impl From<String> for Repeat {
+    fn from(value: String) -> Self {
+        Self::horizontal(value).into()
+    }
+}
+
+/// Panel-level query options from Grafana's query options pane.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct PanelQueryOptions {
+    pub(crate) min_interval: Option<String>,
+    pub(crate) max_data_points: Option<u32>,
+    pub(crate) time_from: Option<String>,
+    pub(crate) time_shift: Option<String>,
+    pub(crate) hide_time_override: bool,
+}
+
 /// The semantic panel model produced by typed builders and macros.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Panel {
@@ -110,8 +226,10 @@ pub struct Panel {
     pub(crate) transformations: Vec<Transformation>,
     pub(crate) field_config: FieldConfig,
     pub(crate) text: Option<(TextMode, String)>,
-    pub(crate) links: Vec<DashboardLink>,
+    pub(crate) links: Vec<DataLink>,
     pub(crate) transparent: bool,
+    pub(crate) query_options: PanelQueryOptions,
+    pub(crate) repeat: Option<Repeat>,
     pub(crate) kind_options: PanelOptions,
     pub(crate) raw_options: BTreeMap<String, Value>,
     pub(crate) extra: BTreeMap<String, Value>,
@@ -134,6 +252,8 @@ impl Panel {
             text: None,
             links: Vec::new(),
             transparent: false,
+            query_options: PanelQueryOptions::default(),
+            repeat: None,
             kind_options: PanelOptions::None,
             raw_options: BTreeMap::new(),
             extra: BTreeMap::new(),
@@ -150,6 +270,20 @@ impl Panel {
     #[must_use]
     pub fn kind(&self) -> &PanelKind {
         &self.kind
+    }
+
+    /// Returns how the panel repeats, if it does.
+    #[must_use]
+    pub fn repeat(&self) -> Option<&Repeat> {
+        self.repeat.as_ref()
+    }
+
+    /// The width automatic layout reserves: the full row for a horizontal repeat, which Grafana always stretches to 24 columns.
+    pub(crate) fn layout_width(&self) -> u16 {
+        match self.repeat {
+            Some(Repeat::Horizontal(_)) => 24,
+            Some(Repeat::Vertical(_)) | None => self.width,
+        }
     }
 }
 
@@ -302,6 +436,58 @@ panel_markers!(
     ),
 );
 
+macro_rules! panel_query_option_setters {
+    () => {
+        /// Sets the panel's minimum query interval, such as `1m`.
+        ///
+        /// This is the lower limit for `$__interval` and `$__rate_interval` across every query in the panel (Grafana's `interval` key). A query's own `interval` overrides it for that query. The value is a number with a unit from `ms`, `s`, `m`, `h`, `d`, `w`, `M`, or `y`, or a `$variable`.
+        #[must_use]
+        pub fn min_interval(mut self, interval: impl Into<String>) -> Self {
+            self.panel.query_options.min_interval = Some(interval.into());
+            self
+        }
+
+        /// Caps the number of data points each query returns (Grafana's `maxDataPoints`).
+        #[must_use]
+        pub fn max_data_points(mut self, max_data_points: u32) -> Self {
+            self.panel.query_options.max_data_points = Some(max_data_points);
+            self
+        }
+
+        /// Replaces the dashboard's relative time range for this panel, for example `24h` for the last 24 hours or `now/d` for today so far (Grafana's `timeFrom`).
+        ///
+        /// Grafana ignores the override while the dashboard time range is absolute.
+        #[must_use]
+        pub fn time_from(mut self, time_from: impl Into<String>) -> Self {
+            self.panel.query_options.time_from = Some(time_from.into());
+            self
+        }
+
+        /// Shifts this panel's time range into the past, for example `1d` to show the same window yesterday, or `1d/d` to also round to whole days (Grafana's `timeShift`).
+        #[must_use]
+        pub fn time_shift(mut self, time_shift: impl Into<String>) -> Self {
+            self.panel.query_options.time_shift = Some(time_shift.into());
+            self
+        }
+
+        /// Hides the time override notice Grafana shows in the panel header when `time_from` or `time_shift` is set.
+        #[must_use]
+        pub fn hide_time_override(mut self, hide: bool) -> Self {
+            self.panel.query_options.hide_time_override = hide;
+            self
+        }
+
+        /// Repeats the panel for each selected value of a dashboard variable.
+        ///
+        /// A variable name on its own repeats horizontally. See [`Repeat`] for how each direction lays out.
+        #[must_use]
+        pub fn repeat(mut self, repeat: impl Into<Repeat>) -> Self {
+            self.panel.repeat = Some(repeat.into());
+            self
+        }
+    };
+}
+
 /// A lightweight handwritten builder for one statically known panel type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PanelBuilder<K: PanelType> {
@@ -452,10 +638,19 @@ impl<K: PanelType> PanelBuilder<K> {
         self
     }
 
-    /// Adds an exact-value display mapping.
+    /// Adds a value mapping to the field defaults.
     #[must_use]
     pub fn mapping(mut self, mapping: ValueMapping) -> Self {
         self.panel.field_config.mappings.push(mapping);
+        self
+    }
+
+    /// Adds a data link to the field defaults, shown when a viewer clicks a value.
+    ///
+    /// Unlike [`PanelBuilder::link`], which sits in the panel header, a field link can interpolate the clicked value through [`crate::DataLinkVariable`].
+    #[must_use]
+    pub fn data_link(mut self, link: DataLink) -> Self {
+        self.panel.field_config.links.push(link);
         self
     }
 
@@ -466,9 +661,9 @@ impl<K: PanelType> PanelBuilder<K> {
         self
     }
 
-    /// Adds a panel link.
+    /// Adds a link to the panel header.
     #[must_use]
-    pub fn link(mut self, link: DashboardLink) -> Self {
+    pub fn link(mut self, link: DataLink) -> Self {
         self.panel.links.push(link);
         self
     }
@@ -479,6 +674,8 @@ impl<K: PanelType> PanelBuilder<K> {
         self.panel.transparent = transparent;
         self
     }
+
+    panel_query_option_setters!();
 
     /// Adds a plugin-specific value under the panel's `options` object.
     ///
@@ -856,9 +1053,9 @@ impl RawPanel {
         self
     }
 
-    /// Adds a panel link.
+    /// Adds a link to the panel header.
     #[must_use]
-    pub fn link(mut self, link: DashboardLink) -> Self {
+    pub fn link(mut self, link: DataLink) -> Self {
         self.panel.links.push(link);
         self
     }
@@ -869,6 +1066,8 @@ impl RawPanel {
         self.panel.transparent = transparent;
         self
     }
+
+    panel_query_option_setters!();
 
     /// Adds a plugin option.
     ///
