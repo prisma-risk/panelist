@@ -282,6 +282,14 @@ vocab!(CURSOR_SYNC, "cursor sync", "DashboardCursorSync", [
     "crosshair" => "Crosshair",
     "tooltip" => "Tooltip",
 ]);
+vocab!(GRAFANA_TARGET, "Grafana target", "GrafanaTarget", [
+    "v11_5" => "V11_5",
+    "v13" => "V13",
+]);
+vocab!(PANEL_IDS, "panel ID scheme", "PanelIds", [
+    "positional" => "Positional",
+    "stable" => "Stable",
+]);
 vocab!(VARIABLE_SORT, "variable sort", "VariableSort", [
     "disabled" => "Disabled",
     "alphabetical_asc" => "AlphabeticalAscending",
@@ -452,7 +460,9 @@ pub(crate) static DASHBOARD: Context = Context {
         expr("editable", ALL),
         expr("datasource", ALL),
         key("cursor_sync", ALL, Form::Enum("cursor_sync", &CURSOR_SYNC)),
+        key("target", ALL, Form::Enum("target", &GRAFANA_TARGET)),
         expr("schema_version", ALL),
+        key("panel_ids", ALL, Form::Enum("panel_ids", &PANEL_IDS)),
         expr("version", ALL),
         key(
             "link",
@@ -478,6 +488,7 @@ pub(crate) static ROW: Context = Context {
     var: "__panelist_row",
     panels: true,
     keys: &[
+        expr("key", ALL),
         expr("collapsed", ALL),
         expr("panel", ALL),
         expr("panels", ALL),
@@ -500,6 +511,7 @@ pub(crate) static PANEL: Context = Context {
         expr("width", ALL),
         expr("height", ALL),
         expr("id", ALL),
+        expr("key", ALL),
         key("grid", ALL, Form::Grid("grid_pos")),
         expr("datasource", ALL),
         key("unit", ALL, Form::Unit("unit")),

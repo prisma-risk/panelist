@@ -498,6 +498,24 @@ let dashboard = Dashboard::new("Checkout")
 
 An unkeyed panel's identity is its row's identity plus its own title, and a row's identity is its title. So renaming an unkeyed panel, or the row it sits in, changes its ID. A `.key("…")` replaces the titles: a keyed row keeps its ID, and its unkeyed panels keep theirs, across a rename, and a keyed panel keeps its ID across a rename and a move to another row. Use keys where titles repeat or where links must outlive a rename.
 
+In `dashboard!`, the same dashboard is `panel_ids: stable;` with a `key: "…";` in the row or panel block:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "Checkout";
+    panel_ids: stable;
+
+    row "HTTP" {
+        key: "http";
+        timeseries "Requests" {}
+        stat "Errors" { key: "errors"; }
+    }
+};
+# let _ = dashboard;
+```
+
 The hash is a fixed, documented FNV-1a, so IDs never change between Rust or Panelist releases, and they fall in `65536..2^30`, inside Grafana's `uint32` panel IDs and clear of small hand-pinned IDs. Two panels or rows that land on the same ID, including a derived ID equal to an explicit one, are a validation error naming both. Panelist never quietly picks another ID.
 
 ## Reusable components
@@ -618,6 +636,8 @@ A `GrafanaTarget` names the Grafana release line the JSON is written for. It set
 let dashboard = Dashboard::new("Checkout").target(GrafanaTarget::V11_5);
 # let _ = dashboard;
 ```
+
+In `dashboard!`, write `target: v11_5;` or `target: v13;`.
 
 `make verify-grafana` round-trips every golden dashboard, rendered for each target, through that target's Grafana release and fails if Grafana drops or alters any property. For another release, pick the nearest older target and override the number with `.schema_version(N)`; that changes only the number.
 

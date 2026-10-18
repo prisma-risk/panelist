@@ -1,12 +1,12 @@
 error: unknown item `timeserie` in the dashboard; did you mean `timeseries`?
-       items accepted here: `uid`, `description`, `tags`, `refresh`, `time`, `timezone`, `editable`, `datasource`, `cursor_sync`, `schema_version`, `version`, `link`, `variable`, `row`, `panel`, `panels`, `extra`, `timeseries`, `stat`, `gauge`, `table`, `text`, `bar_gauge`, `heatmap`
+       items accepted here: `uid`, `description`, `tags`, `refresh`, `time`, `timezone`, `editable`, `datasource`, `cursor_sync`, `target`, `schema_version`, `panel_ids`, `version`, `link`, `variable`, `row`, `panel`, `panels`, `extra`, `timeseries`, `stat`, `gauge`, `table`, `text`, `bar_gauge`, `heatmap`
   --> tests/ui/unknown_item.rs:29:9
    |
 29 |         timeserie "Requests" {}
    |         ^^^^^^^^^
 
 error: unknown item `colapsed` in a row; did you mean `collapsed`?
-       items accepted here: `collapsed`, `panel`, `panels`, `timeseries`, `stat`, `gauge`, `table`, `text`, `bar_gauge`, `heatmap`
+       items accepted here: `key`, `collapsed`, `panel`, `panels`, `timeseries`, `stat`, `gauge`, `table`, `text`, `bar_gauge`, `heatmap`
   --> tests/ui/unknown_item.rs:31:13
    |
 31 |             colapsed: true;

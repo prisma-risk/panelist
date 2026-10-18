@@ -1,12 +1,12 @@
 error: unknown key `fill_opactiy` in a `timeseries` panel; did you mean `fill_opacity`?
-       keys accepted here: `query`, `legend_format`, `description`, `width`, `height`, `id`, `grid`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds`, `mapping`, `link`, `override`, `transform`, `option`, `extra`, `fill_opacity`, `line_width`, `point_size`, `span_nulls`, `line_interpolation`, `show_points`, `stacking`, `tooltip`, `legend`
+       keys accepted here: `query`, `legend_format`, `description`, `width`, `height`, `id`, `key`, `grid`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds`, `mapping`, `link`, `override`, `transform`, `option`, `extra`, `fill_opacity`, `line_width`, `point_size`, `span_nulls`, `line_interpolation`, `show_points`, `stacking`, `tooltip`, `legend`
   --> tests/ui/unknown_key.rs:31:13
    |
 31 |             fill_opactiy: 10.0;
    |             ^^^^^^^^^^^^
 
 error: unknown key `widht` in a `timeseries` panel; did you mean `width`?
-       keys accepted here: `query`, `legend_format`, `description`, `width`, `height`, `id`, `grid`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds`, `mapping`, `link`, `override`, `transform`, `option`, `extra`, `fill_opacity`, `line_width`, `point_size`, `span_nulls`, `line_interpolation`, `show_points`, `stacking`, `tooltip`, `legend`
+       keys accepted here: `query`, `legend_format`, `description`, `width`, `height`, `id`, `key`, `grid`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds`, `mapping`, `link`, `override`, `transform`, `option`, `extra`, `fill_opacity`, `line_width`, `point_size`, `span_nulls`, `line_interpolation`, `show_points`, `stacking`, `tooltip`, `legend`
   --> tests/ui/unknown_key.rs:32:13
    |
 32 |             widht: 12;
