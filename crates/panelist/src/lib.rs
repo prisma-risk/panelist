@@ -58,6 +58,7 @@ mod grafana;
 mod heatmap;
 mod macros;
 mod panel;
+mod promql;
 mod query;
 mod table;
 mod transformation;
@@ -77,6 +78,7 @@ pub use panel::{
     BarGauge, Gauge, GridPos, Heatmap, Panel, PanelBuilder, PanelKind, RawPanel, Stat, Table, Text,
     TextMode, Timeseries,
 };
+pub use promql::{LegendFormatError, Matchers, RangeSelector, Selector, legend};
 pub use query::{
     LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery,
 };
@@ -101,6 +103,7 @@ pub use visualization::{
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::promql::{check_legend, render_legend};
     pub use serde_json;
 }
 
@@ -112,14 +115,14 @@ pub mod prelude {
         DashboardCursorSync, DashboardLink, DataSource, DataSourceVariable, FieldConfig,
         FieldOverride, Gauge, GaugeCell, GridPos, Heatmap, HeatmapColorMode, HeatmapColorScheme,
         JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, Legend, LegendMode,
-        LegendPlacement, LineInterpolation, LokiQuery, OrganizeFields, Orientation,
+        LegendPlacement, LineInterpolation, LokiQuery, Matchers, OrganizeFields, Orientation,
         OverrideMatcher, OverrideProperty, Panel, PanelKind, PointVisibility, PrometheusFormat,
-        PrometheusQuery, Query, QueryEditorMode, QueryVariable, RawPanel, RawQuery,
-        RawTransformation, ReduceOptions, Reducer, Row, SortBy, SortDirection, SparklineCell,
-        Stacking, StackingMode, Stat, StatColorMode, StatGraphMode, Table, TableCell,
-        TableCellType, Text, TextMode, ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable,
-        Timeseries, Tooltip, TooltipMode, TooltipSort, Transformation, Unit, ValueMapping,
-        Variable, VariableBuilder, VariableRefresh, VariableSelection, VariableSort, dashboard,
-        loki, loki_query, prometheus, promql,
+        PrometheusQuery, Query, QueryEditorMode, QueryVariable, RangeSelector, RawPanel, RawQuery,
+        RawTransformation, ReduceOptions, Reducer, Row, Selector, SortBy, SortDirection,
+        SparklineCell, Stacking, StackingMode, Stat, StatColorMode, StatGraphMode, Table,
+        TableCell, TableCellType, Text, TextMode, ThresholdMode, Thresholds, TimeRange,
+        TimeSeriesToTable, Timeseries, Tooltip, TooltipMode, TooltipSort, Transformation, Unit,
+        ValueMapping, Variable, VariableBuilder, VariableRefresh, VariableSelection, VariableSort,
+        dashboard, legend, loki, loki_query, prometheus, promql,
     };
 }

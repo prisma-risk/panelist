@@ -405,6 +405,31 @@ let dashboard = dashboard! {
 # let _ = dashboard;
 ```
 
+### Composing PromQL
+
+Expressions stay plain strings, but two parts of them are painful to splice with `format!`: label selectors, whose braces must be doubled, and legend formats, where Grafana's `{{label}}` becomes `{{{{label}}}}`. `Selector` and `legend!` take care of both:
+
+```rust
+use panelist::prelude::*;
+
+let base = Matchers::new().eq("job", "api").re("instance", "$instance");
+let requests = Selector::metric("http_requests_total").with(&base);
+let errors = requests.clone().re("status", "5..");
+
+let panel = Timeseries::new("Error ratio by route")
+    .query(
+        PrometheusQuery::new(format!(
+            "sum by (route) (rate({})) / sum by (route) (rate({}))",
+            errors.range("$__rate_interval"),
+            requests.range("$__rate_interval"),
+        ))
+        .legend_format(legend!("{route} · errors")),
+    );
+# let _ = panel;
+```
+
+`Selector` quotes and escapes label values, keeps matchers in insertion order, and passes Grafana variables through. A range attaches to the selector itself, so a factored-out selector cannot turn `rate(metric{…}[5m])` into the stepless subquery `rate((metric{…})[5m])`. `legend!` turns `{label}` into `{{label}}` and rejects anything that is not a Prometheus label name at compile time; `legend()` does the same at run time and returns a `LegendFormatError`.
+
 ## Serialization and validation
 
 `Dashboard` implements `serde::Serialize`, so normal `serde_json` APIs work.

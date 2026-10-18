@@ -47,7 +47,10 @@ fn service_stats(service: &str) -> Vec<Panel> {
             .into(),
         Gauge::new("Availability")
             .query(PrometheusQuery::new(format!(
-                "avg_over_time(up{{job=\"{service}\"}}[$__rate_interval])"
+                "avg_over_time({})",
+                Selector::metric("up")
+                    .eq("job", service)
+                    .range("$__rate_interval"),
             )))
             .unit(Unit::PercentUnit)
             .width(8)
