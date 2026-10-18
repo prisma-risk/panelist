@@ -46,9 +46,8 @@ them on a live Grafana.
 
 Panelist is under active development. Add the current release from crates.io:
 
-```toml
-[dependencies]
-panelist = "0.3.0"
+```bash
+cargo add panelist
 ```
 
 The minimum supported Rust version is 1.96. Panelist uses Rust 2024 and has no
