@@ -252,6 +252,28 @@ pub enum ValidationError {
         /// The selector that was ignored.
         ignored: &'static str,
     },
+    /// A keyed table has an empty key label, so there is nothing to join on.
+    #[error("panel \"{panel}\": keyed table needs a key label to join on")]
+    MissingTableKey {
+        /// Panel title.
+        panel: String,
+    },
+    /// A keyed table column has an empty name.
+    #[error("panel \"{panel}\": keyed table column name must not be empty")]
+    MissingTableColumnName {
+        /// Panel title.
+        panel: String,
+    },
+    /// Two keyed table columns, or a column and the key, share a name.
+    ///
+    /// A column name is its header, its rename target, and its override matcher at once, so a second column with the same name cannot be told apart from the first.
+    #[error("panel \"{panel}\": keyed table column \"{column}\" is defined more than once")]
+    DuplicateTableColumn {
+        /// Panel title.
+        panel: String,
+        /// The repeated column name.
+        column: String,
+    },
     /// A transformation is missing a required field name.
     #[error("panel \"{panel}\": {transformation} transformation requires a field name")]
     MissingTransformationField {

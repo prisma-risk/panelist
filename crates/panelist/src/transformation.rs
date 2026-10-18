@@ -58,12 +58,14 @@ pub(crate) struct TransformationEnvelope {
 /// How Grafana joins multiple query results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JoinMode {
-    /// Keep every row from every input. Best for time series.
+    /// Keep every row from every input, merging rows that share a join value. Right for time series, and for table queries that each hold one row per join value, such as instant Prometheus queries grouped by the join label.
     #[default]
     Outer,
     /// Keep only rows present in every input.
     Inner,
-    /// Outer join permitting duplicate join values. Best for tabular data.
+    /// Outer join meant for inputs that repeat join values.
+    ///
+    /// Its result depends on the Grafana version. Joining several frames that each hold one row per join value, Grafana 13 merges them into one row per value, but Grafana 11.5 emits one row per value per frame, each holding a single frame's fields. Prefer [`JoinMode::Outer`] unless an input really repeats join values.
     OuterTabular,
 }
 
@@ -93,6 +95,8 @@ impl JoinByField {
     }
 
     /// Joins on a field using a tabular outer join.
+    ///
+    /// See [`JoinMode::OuterTabular`] for when this differs from [`JoinByField::new`] across Grafana versions.
     #[must_use]
     pub fn outer_tabular(field: impl Into<String>) -> Self {
         Self::new(field).mode(JoinMode::OuterTabular)
