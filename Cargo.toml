@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/panelist", "crates/panelist-macros"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.96"
 license = "Apache-2.0"
@@ -17,7 +17,7 @@ publish = true
 
 [workspace.dependencies]
 # Released in lockstep with `panelist`, which pins it exactly.
-panelist-macros = { version = "=0.3.0", path = "crates/panelist-macros" }
+panelist-macros = { version = "=0.4.0", path = "crates/panelist-macros" }
 proc-macro2 = "1"
 quote = "1"
 serde = { version = "1", features = ["derive"] }
