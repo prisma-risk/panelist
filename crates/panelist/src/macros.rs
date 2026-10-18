@@ -62,6 +62,46 @@ macro_rules! loki {
 /// when the expansion calls a builder method that type doesn't have. Such
 /// mistakes surface as a compile error pointing into the macro expansion
 /// rather than at the offending line in your `dashboard!` block.
+///
+/// Repeats, time overrides, value mappings, data links, and annotations each map to one builder call:
+///
+/// ```rust
+/// use panelist::prelude::*;
+///
+/// let dashboard = dashboard! {
+///     title: "API";
+///     datasource: prometheus("prometheus-main");
+///
+///     variable "instance" {
+///         query: promql!("label_values(up{job=\"api\"}, instance)");
+///         multi: true;
+///     }
+///
+///     annotation "Restarts" => "changes(process_start_time_seconds{job=\"api\"}[2m]) > 0" {
+///         text_format: "{{instance}} restarted";
+///         tag_keys: ["instance"];
+///         icon_color: orange;
+///     }
+///
+///     row "Per instance" {
+///         repeat: "instance";
+///
+///         stat "Up" {
+///             query: promql!("up{instance=\"$instance\"}");
+///             repeat: horizontal("instance", 4);
+///             time_from: "1h";
+///             min_interval: "30s";
+///             mapping "1" => "Up" { color: green; }
+///             mapping special(null) => "No data";
+///             mapping range(0.0, 0.5) => "Degraded";
+///             data_link "Logs" => "/explore?instance=${__field.labels.instance}" {
+///                 keep_time: true;
+///             }
+///         }
+///     }
+/// };
+/// # let _ = dashboard;
+/// ```
 #[macro_export]
 macro_rules! dashboard {
     (title: $title:expr; $($body:tt)*) => {{
@@ -130,6 +170,26 @@ macro_rules! __panelist_dashboard_items {
         $dashboard = $dashboard.panels($panels);
         $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
     };
+    // A Prometheus annotation: name, then the PromQL expression.
+    ($dashboard:ident; annotation $name:literal => $expr:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_annotation = $crate::PrometheusAnnotation::new($name, $expr);
+        $crate::__panelist_annotation_items!(__panelist_annotation; $($body)*);
+        $dashboard = $dashboard.annotation(__panelist_annotation);
+        $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
+    };
+    ($dashboard:ident; annotation $name:literal => $expr:literal; $($rest:tt)*) => {
+        $dashboard = $dashboard.annotation($crate::PrometheusAnnotation::new($name, $expr));
+        $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
+    };
+    // Any prebuilt annotation, such as a `RawAnnotation`.
+    ($dashboard:ident; annotation: $annotation:expr; $($rest:tt)*) => {
+        $dashboard = $dashboard.annotation($annotation);
+        $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
+    };
+    ($dashboard:ident; built_in_annotation: $built_in:expr; $($rest:tt)*) => {
+        $dashboard = $dashboard.built_in_annotation($built_in);
+        $crate::__panelist_dashboard_items!($dashboard; $($rest)*);
+    };
 
     ($dashboard:ident; variable $name:literal { $($body:tt)* } $($rest:tt)*) => {
         let mut __panelist_variable = $crate::VariableBuilder::new($name);
@@ -195,6 +255,10 @@ macro_rules! __panelist_row_items {
     ($row:ident;) => {};
     ($row:ident; collapsed: $collapsed:expr; $($rest:tt)*) => {
         $row = $row.collapsed($collapsed);
+        $crate::__panelist_row_items!($row; $($rest)*);
+    };
+    ($row:ident; repeat: $variable:expr; $($rest:tt)*) => {
+        $row = $row.repeat($variable);
         $crate::__panelist_row_items!($row; $($rest)*);
     };
     ($row:ident; panels: $panels:expr; $($rest:tt)*) => {
@@ -414,6 +478,43 @@ macro_rules! __panelist_panel_items {
         $panel = $panel.transparent($transparent);
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    ($panel:ident; min_interval: $interval:expr; $($rest:tt)*) => {
+        $panel = $panel.min_interval($interval);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; max_data_points: $points:expr; $($rest:tt)*) => {
+        $panel = $panel.max_data_points($points);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; time_from: $time_from:expr; $($rest:tt)*) => {
+        $panel = $panel.time_from($time_from);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; time_shift: $time_shift:expr; $($rest:tt)*) => {
+        $panel = $panel.time_shift($time_shift);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; hide_time_override: $hide:expr; $($rest:tt)*) => {
+        $panel = $panel.hide_time_override($hide);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    // The direction forms come first: `vertical(…)` would also parse as the plain `$variable:expr` below, and then fail to convert.
+    ($panel:ident; repeat: vertical($variable:expr); $($rest:tt)*) => {
+        $panel = $panel.repeat($crate::Repeat::vertical($variable));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; repeat: horizontal($variable:expr, $max_per_row:expr); $($rest:tt)*) => {
+        $panel = $panel.repeat($crate::Repeat::horizontal($variable).max_per_row($max_per_row));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; repeat: horizontal($variable:expr); $($rest:tt)*) => {
+        $panel = $panel.repeat($crate::Repeat::horizontal($variable));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; repeat: $variable:expr; $($rest:tt)*) => {
+        $panel = $panel.repeat($variable);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; content: $content:expr; $($rest:tt)*) => {
         $panel = $panel.content($content);
         $crate::__panelist_panel_items!($panel; $($rest)*);
@@ -443,24 +544,68 @@ macro_rules! __panelist_panel_items {
     // Block forms come before their `;` counterparts: an arm ending in
     // `{ $($body:tt)* } $($rest:tt)*` has no literal separator to anchor on,
     // so ordering is what keeps it from being shadowed.
+    ($panel:ident; mapping range($from:expr, $to:expr) => $text:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_mapping = $crate::ValueMapping::range($from, $to).text($text);
+        $crate::__panelist_mapping_items!(__panelist_mapping; $($body)*);
+        $panel = $panel.mapping(__panelist_mapping);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; mapping range($from:expr, $to:expr) => $text:literal; $($rest:tt)*) => {
+        $panel = $panel.mapping($crate::ValueMapping::range($from, $to).text($text));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; mapping regex($pattern:expr) => $text:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_mapping = $crate::ValueMapping::regex($pattern).text($text);
+        $crate::__panelist_mapping_items!(__panelist_mapping; $($body)*);
+        $panel = $panel.mapping(__panelist_mapping);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; mapping regex($pattern:expr) => $text:literal; $($rest:tt)*) => {
+        $panel = $panel.mapping($crate::ValueMapping::regex($pattern).text($text));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; mapping special($special:tt) => $text:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_mapping =
+            $crate::ValueMapping::special($crate::__panelist_special_value!($special)).text($text);
+        $crate::__panelist_mapping_items!(__panelist_mapping; $($body)*);
+        $panel = $panel.mapping(__panelist_mapping);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; mapping special($special:tt) => $text:literal; $($rest:tt)*) => {
+        $panel = $panel.mapping(
+            $crate::ValueMapping::special($crate::__panelist_special_value!($special)).text($text),
+        );
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
     ($panel:ident; mapping $value:literal => $text:literal { $($body:tt)* } $($rest:tt)*) => {
-        let mut __panelist_mapping = $crate::ValueMapping::new($value, $text);
+        let mut __panelist_mapping = $crate::ValueMapping::value($value).text($text);
         $crate::__panelist_mapping_items!(__panelist_mapping; $($body)*);
         $panel = $panel.mapping(__panelist_mapping);
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
     ($panel:ident; mapping $value:literal => $text:literal; $($rest:tt)*) => {
-        $panel = $panel.mapping($crate::ValueMapping::new($value, $text));
+        $panel = $panel.mapping($crate::ValueMapping::value($value).text($text));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
+    // Panel header links and field links are both Grafana data links, so they share one item grammar, distinct from the dashboard `link`.
     ($panel:ident; link $title:literal => $url:literal { $($body:tt)* } $($rest:tt)*) => {
-        let mut __panelist_link = $crate::DashboardLink::new($title, $url);
-        $crate::__panelist_link_items!(__panelist_link; $($body)*);
+        let mut __panelist_link = $crate::DataLink::new($title, $url);
+        $crate::__panelist_data_link_items!(__panelist_link; $($body)*);
         $panel = $panel.link(__panelist_link);
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
     ($panel:ident; link $title:literal => $url:literal; $($rest:tt)*) => {
-        $panel = $panel.link($crate::DashboardLink::new($title, $url));
+        $panel = $panel.link($crate::DataLink::new($title, $url));
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; data_link $title:literal => $url:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_link = $crate::DataLink::new($title, $url);
+        $crate::__panelist_data_link_items!(__panelist_link; $($body)*);
+        $panel = $panel.data_link(__panelist_link);
+        $crate::__panelist_panel_items!($panel; $($rest)*);
+    };
+    ($panel:ident; data_link $title:literal => $url:literal; $($rest:tt)*) => {
+        $panel = $panel.data_link($crate::DataLink::new($title, $url));
         $crate::__panelist_panel_items!($panel; $($rest)*);
     };
     ($panel:ident; legend { $($body:tt)* } $($rest:tt)*) => {
@@ -838,6 +983,93 @@ macro_rules! __panelist_link_items {
 
 #[doc(hidden)]
 #[macro_export]
+macro_rules! __panelist_data_link_items {
+    ($link:ident;) => {};
+    ($link:ident; target_blank: $target:expr; $($rest:tt)*) => {
+        $link = $link.target_blank($target);
+        $crate::__panelist_data_link_items!($link; $($rest)*);
+    };
+    ($link:ident; include_vars: $include:expr; $($rest:tt)*) => {
+        $link = $link.include_vars($include);
+        $crate::__panelist_data_link_items!($link; $($rest)*);
+    };
+    ($link:ident; keep_time: $keep:expr; $($rest:tt)*) => {
+        $link = $link.keep_time($keep);
+        $crate::__panelist_data_link_items!($link; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_special_value {
+    (null) => {
+        $crate::SpecialValue::Null
+    };
+    (nan) => {
+        $crate::SpecialValue::NaN
+    };
+    (null_or_nan) => {
+        $crate::SpecialValue::NullOrNaN
+    };
+    (true) => {
+        $crate::SpecialValue::True
+    };
+    (false) => {
+        $crate::SpecialValue::False
+    };
+    (empty) => {
+        $crate::SpecialValue::Empty
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __panelist_annotation_items {
+    ($annotation:ident;) => {};
+    ($annotation:ident; datasource: $datasource:expr; $($rest:tt)*) => {
+        $annotation = $annotation.datasource($datasource);
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+    ($annotation:ident; enable: $enable:expr; $($rest:tt)*) => {
+        $annotation = $annotation.enable($enable);
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+    ($annotation:ident; hide: $hide:expr; $($rest:tt)*) => {
+        $annotation = $annotation.hide($hide);
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+    ($annotation:ident; icon_color: $color:literal; $($rest:tt)*) => {
+        $annotation = $annotation.icon_color($crate::Color::Custom(($color).into()));
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+    ($annotation:ident; icon_color: $color:ident; $($rest:tt)*) => {
+        $annotation = $annotation.icon_color($crate::__panelist_color!($color));
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+    ($annotation:ident; step: $step:expr; $($rest:tt)*) => {
+        $annotation = $annotation.step($step);
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+    ($annotation:ident; title_format: $format:expr; $($rest:tt)*) => {
+        $annotation = $annotation.title_format($format);
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+    ($annotation:ident; text_format: $format:expr; $($rest:tt)*) => {
+        $annotation = $annotation.text_format($format);
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+    ($annotation:ident; tag_keys: [$($key:expr),* $(,)?]; $($rest:tt)*) => {
+        $annotation = $annotation.tag_keys([$($key),*]);
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+    ($annotation:ident; use_value_for_time: $use_value:expr; $($rest:tt)*) => {
+        $annotation = $annotation.use_value_for_time($use_value);
+        $crate::__panelist_annotation_items!($annotation; $($rest)*);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __panelist_cursor_sync {
     (off) => {
         $crate::DashboardCursorSync::Off
@@ -1103,6 +1335,16 @@ macro_rules! __panelist_override_items {
     };
     ($field:ident; line_width: $width:expr; $($rest:tt)*) => {
         $field = $field.line_width($width);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; data_link $title:literal => $url:literal { $($body:tt)* } $($rest:tt)*) => {
+        let mut __panelist_link = $crate::DataLink::new($title, $url);
+        $crate::__panelist_data_link_items!(__panelist_link; $($body)*);
+        $field = $field.data_link(__panelist_link);
+        $crate::__panelist_override_items!($field; $($rest)*);
+    };
+    ($field:ident; data_link $title:literal => $url:literal; $($rest:tt)*) => {
+        $field = $field.data_link($crate::DataLink::new($title, $url));
         $crate::__panelist_override_items!($field; $($rest)*);
     };
     ($field:ident; cell: sparkline { $($body:tt)* }; $($rest:tt)*) => {

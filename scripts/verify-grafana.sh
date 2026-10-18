@@ -39,6 +39,7 @@ GOLDEN_NAMES=(
   "basic.json"
   "route_performance.json"
   "stable_ids.json"
+  "panel_features.json"
 )
 
 # Override these to run beside another Grafana, or another run of this script.

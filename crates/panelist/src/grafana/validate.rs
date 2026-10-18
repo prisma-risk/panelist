@@ -108,6 +108,7 @@ pub(crate) fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
         }
     }
     validate_variable_references(dashboard, &mut errors);
+    super::validate_options::validate_options(dashboard, &mut errors);
     ValidationErrors::from_vec(errors)
 }
 
