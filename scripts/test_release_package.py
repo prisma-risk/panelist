@@ -2,6 +2,7 @@
 """Release preparation contracts, without publishing or changing the source tree."""
 import importlib.util
 import io
+import os
 from pathlib import Path
 import subprocess
 import tarfile
@@ -22,6 +23,37 @@ class ReleasePackageTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / "Cargo.toml").write_text('[workspace]\nmembers=["crates/panelist"]\n[workspace.package]\nversion = "0.3.0"\npublish=true\n')
         (self.root / "Cargo.lock").write_text('version=4\n[[package]]\nname = "panelist"\nversion = "0.3.0"\n[[package]]\nname="serde"\nversion="1.0.0"\nsource="registry+https://github.com/rust-lang/crates.io-index"\nchecksum="unchanged"\n')
+
+    def test_workflow_selects_only_exact_commits_already_in_main(self):
+        workflow = Path(__file__).resolve().parents[1] / ".github/workflows/release-plz.yml"
+        lines = workflow.read_text().splitlines()
+        position = lines.index("      - name: Select reviewed source")
+        body = []
+        for line in lines[position + 3:]:
+            if not line.startswith("          "):
+                break
+            body.append(line[10:])
+        self.assertTrue(body)
+        script = "\n".join(body)
+        def git(*arguments):
+            return subprocess.check_output(["git", "-c", "commit.gpgsign=false", *arguments],
+                                           cwd=self.root, text=True, stderr=subprocess.DEVNULL).strip()
+        git("init", "-q")
+        git("config", "user.name", "Release test")
+        git("config", "user.email", "release@example.test")
+        git("add", "Cargo.toml", "Cargo.lock")
+        git("commit", "-qm", "first")
+        first = git("rev-parse", "HEAD")
+        git("commit", "--allow-empty", "-qm", "main")
+        main = git("rev-parse", "HEAD")
+        foreign = git("commit-tree", "HEAD^{tree}", "-m", "unreviewed")
+        for selected, valid in [(first, True), (main, True), (foreign, False), ("HEAD", False), ("a" * 40, False)]:
+            git("checkout", "--detach", main)
+            result = subprocess.run(["bash", "-c", script], cwd=self.root,
+                                    env=dict(os.environ, SOURCE_SHA=selected, GITHUB_SHA=main),
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.assertEqual(result.returncode == 0, valid, selected)
+            self.assertEqual(git("rev-parse", "HEAD"), selected if valid else main)
 
     def test_selected_version_packages_offline_and_preserves_locked_dependencies(self):
         original = tomllib.loads((self.root / "Cargo.lock").read_text())["package"][1]
