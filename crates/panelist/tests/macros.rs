@@ -281,8 +281,7 @@ fn table_cell_and_sort_dsl_matches_the_builder_model() {
             override field("Error rate") {
                 unit: percent;
                 cell: colored_background;
-                thresholds {
-                    green: 0.0;
+                thresholds(green) {
                     yellow: 1.0;
                     red: 5.0;
                 }
@@ -306,7 +305,11 @@ fn table_cell_and_sort_dsl_matches_the_builder_model() {
                 FieldOverride::by_name("Error rate")
                     .unit(Unit::Percent)
                     .cell_type(TableCellType::ColoredBackground)
-                    .thresholds(Thresholds::new().green(0.0).yellow(1.0).red(5.0)),
+                    .thresholds(
+                        Thresholds::absolute(Color::Green)
+                            .step(1.0, Color::Yellow)
+                            .step(5.0, Color::Red),
+                    ),
             )
             .override_field(
                 FieldOverride::by_name("Trend")
@@ -858,7 +861,7 @@ fn panel_option_parity_dsl_matches_the_builder_model() {
 
         gauge "Saturation" {
             query: promql!("saturation");
-            color: continuous("BlYlRd");
+            color: continuous(ContinuousPalette::BlueYellowRed);
             reduce { values: false; }
         }
 
@@ -910,7 +913,7 @@ fn panel_option_parity_dsl_matches_the_builder_model() {
         .panel(
             Gauge::new("Saturation")
                 .query(PrometheusQuery::new("saturation"))
-                .color(ColorScheme::Continuous("BlYlRd".to_owned()))
+                .color(ColorScheme::Continuous(ContinuousPalette::BlueYellowRed))
                 .reduce_options(ReduceOptions::new().values(false)),
         )
         .panel(
@@ -1411,4 +1414,110 @@ fn panel_feature_dsl_matches_the_builder_model() {
         from_macro.to_json_pretty().unwrap(),
         from_builder.to_json_pretty().unwrap()
     );
+}
+
+#[test]
+fn vocabulary_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Vocabulary";
+
+        stat "Revenue" {
+            query: promql!("sum(revenue_total)") { query_type: instant; }
+            unit: currency(Currency::Eur);
+            color: by_name;
+            thresholds(red) {
+                yellow: 100.0;
+                green: 1000.0;
+            }
+        }
+
+        timeseries "Uptime" {
+            query: promql!("time() - process_start_time_seconds") { query_type: both; }
+            query: promql!("up") { query_type: range; }
+            unit: duration_seconds;
+            color: shades(blue);
+        }
+
+        table "Hosts" {
+            query: promql!("node_network_receive_bytes_total") { ref_id: "A"; }
+            override query("A") {
+                unit: bits_per_second;
+                thresholds(green) {
+                    orange: 1e9;
+                    purple: 1e10;
+                }
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Vocabulary")
+        .panel(
+            Stat::new("Revenue")
+                .query(PrometheusQuery::new("sum(revenue_total)").query_type(QueryType::Instant))
+                .unit(Unit::Currency(Currency::Eur))
+                .color(ColorScheme::ClassicPaletteByName)
+                .thresholds(
+                    Thresholds::absolute(Color::Red)
+                        .step(100.0, Color::Yellow)
+                        .step(1000.0, Color::Green),
+                ),
+        )
+        .panel(
+            Timeseries::new("Uptime")
+                .query(
+                    PrometheusQuery::new("time() - process_start_time_seconds")
+                        .query_type(QueryType::Both),
+                )
+                .query(PrometheusQuery::new("up").query_type(QueryType::Range))
+                .unit(Unit::DurationSeconds)
+                .color(ColorScheme::Shades(Color::Blue)),
+        )
+        .panel(
+            Table::new("Hosts")
+                .query(PrometheusQuery::new("node_network_receive_bytes_total").ref_id("A"))
+                .override_field(
+                    FieldOverride::by_query("A")
+                        .unit(Unit::BitsPerSecond)
+                        .thresholds(
+                            Thresholds::absolute(Color::Green)
+                                .step(1e9, Color::Orange)
+                                .step(1e10, Color::Purple),
+                        ),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
+fn every_unit_keyword_maps_to_its_typed_unit() {
+    macro_rules! unit_of {
+        ($unit:ident) => {
+            dashboard! { title: "Units"; stat "S" { unit: $unit; } }
+        };
+    }
+    for (from_macro, unit) in [
+        (unit_of!(nanoseconds), Unit::Nanoseconds),
+        (unit_of!(microseconds), Unit::Microseconds),
+        (unit_of!(minutes), Unit::Minutes),
+        (unit_of!(hours), Unit::Hours),
+        (unit_of!(days), Unit::Days),
+        (unit_of!(duration_seconds), Unit::DurationSeconds),
+        (unit_of!(duration_milliseconds), Unit::DurationMilliseconds),
+        (unit_of!(bits_per_second), Unit::BitsPerSecond),
+        (unit_of!(packets_per_second), Unit::PacketsPerSecond),
+        (unit_of!(reads_per_second), Unit::ReadsPerSecond),
+        (unit_of!(writes_per_second), Unit::WritesPerSecond),
+        (unit_of!(iops), Unit::IoOperationsPerSecond),
+        (unit_of!(events_per_second), Unit::EventsPerSecond),
+    ] {
+        assert_eq!(
+            from_macro,
+            Dashboard::new("Units").panel(Stat::new("S").unit(unit))
+        );
+    }
 }

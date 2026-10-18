@@ -309,6 +309,36 @@ impl LabelsToFields {
     }
 }
 
+/// Renames every field whose display name matches a regular expression.
+///
+/// Grafana runs the display name through JavaScript's `String.replace` with `regex`, so `rename_pattern` may use `$1`-style capture group references. The regex is a JavaScript one, anchored only where the author anchors it; a leading `/` starts a `/pattern/flags` literal. A field the regex does not match keeps its name.
+///
+/// ```rust
+/// use panelist::prelude::*;
+///
+/// // `checkout-api` becomes `checkout`, `search-api` becomes `search`.
+/// let rename = RenameByRegex::new("(.*)-api", "$1");
+/// # let _ = rename;
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameByRegex {
+    pub(crate) regex: String,
+    pub(crate) rename_pattern: String,
+    pub(crate) envelope: TransformationEnvelope,
+}
+
+impl RenameByRegex {
+    /// Renames fields matching `regex` to `rename_pattern`.
+    #[must_use]
+    pub fn new(regex: impl Into<String>, rename_pattern: impl Into<String>) -> Self {
+        Self {
+            regex: regex.into(),
+            rename_pattern: rename_pattern.into(),
+            envelope: TransformationEnvelope::default(),
+        }
+    }
+}
+
 /// An escape hatch for a transformation Panelist does not model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawTransformation {
@@ -377,6 +407,7 @@ impl_transformation_builder!(
     SortBy,
     TimeSeriesToTable,
     LabelsToFields,
+    RenameByRegex,
     RawTransformation,
 );
 
@@ -394,6 +425,8 @@ pub enum Transformation {
     TimeSeriesToTable(TimeSeriesToTable),
     /// Convert labels into fields.
     LabelsToFields(LabelsToFields),
+    /// Rename fields matching a regular expression.
+    RenameByRegex(RenameByRegex),
     /// An unmodeled Grafana transformation.
     Raw(RawTransformation),
 }
@@ -407,6 +440,7 @@ impl Transformation {
             Self::SortBy(sort) => &sort.envelope,
             Self::TimeSeriesToTable(convert) => &convert.envelope,
             Self::LabelsToFields(labels) => &labels.envelope,
+            Self::RenameByRegex(rename) => &rename.envelope,
             Self::Raw(raw) => &raw.envelope,
         }
     }
@@ -439,6 +473,12 @@ impl From<TimeSeriesToTable> for Transformation {
 impl From<LabelsToFields> for Transformation {
     fn from(value: LabelsToFields) -> Self {
         Self::LabelsToFields(value)
+    }
+}
+
+impl From<RenameByRegex> for Transformation {
+    fn from(value: RenameByRegex) -> Self {
+        Self::RenameByRegex(value)
     }
 }
 

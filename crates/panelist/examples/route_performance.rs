@@ -53,7 +53,7 @@ fn main() -> panelist::Result<()> {
                 unit: percent_unit;
                 width: 6;
 
-                thresholds {
+                thresholds(green) {
                     green: 0.0;
                     yellow: 0.01;
                     red: 0.05;
@@ -92,7 +92,7 @@ fn main() -> panelist::Result<()> {
             bar_gauge "Top routes by traffic" {
                 query: promql!("topk(10, sum by (route) (rate(http_requests_total[$__rate_interval])))") {
                     legend_format: "{{route}}";
-                    instant: true;
+                    query_type: instant;
                 }
                 unit: reqps;
                 width: 12;
@@ -121,7 +121,7 @@ fn main() -> panelist::Result<()> {
                     Column::new("error %", promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum by (route) (rate(http_requests_total[$__rate_interval]))"))
                         .unit(Unit::PercentUnit)
                         .cell(TableCellType::ColoredBackground)
-                        .thresholds(Thresholds::new().green(0.0).yellow(0.01).red(0.05)),
+                        .thresholds(Thresholds::absolute(Color::Green).step(0.0, Color::Green).step(0.01, Color::Yellow).step(0.05, Color::Red)),
                 )
                 .column(
                     Column::new("p50", promql!("histogram_quantile(0.50, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
@@ -131,7 +131,7 @@ fn main() -> panelist::Result<()> {
                     Column::new("p95", promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
                         .unit(Unit::Seconds)
                         .cell(TableCellType::ColoredBackground)
-                        .thresholds(Thresholds::new().green(0.0).yellow(0.3).red(1.0)),
+                        .thresholds(Thresholds::absolute(Color::Green).step(0.0, Color::Green).step(0.3, Color::Yellow).step(1.0, Color::Red)),
                 )
                 .column(
                     Column::new("p99", promql!("histogram_quantile(0.99, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
@@ -176,7 +176,7 @@ fn main() -> panelist::Result<()> {
                 unit: percent;
                 width: 12;
 
-                thresholds {
+                thresholds(red) {
                     red: 0.0;
                     yellow: 20.0;
                     green: 50.0;

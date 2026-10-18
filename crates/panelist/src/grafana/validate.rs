@@ -24,9 +24,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
-    Dashboard, DashboardItem, OrganizeFields, OverrideMatcher, Panel, Query, Thresholds,
-    Transformation, ValidationError, ValidationErrors, Variable, VariableReferenceSite,
-    transformation::TransformationFilter, variable::VariableDiagnostic,
+    Dashboard, DashboardItem, DataSource, OrganizeFields, OverrideMatcher, OverrideProperty, Panel,
+    Query, QueryType, Thresholds, Transformation, ValidationError, ValidationErrors, Variable,
+    VariableReferenceSite, transformation::TransformationFilter, variable::VariableDiagnostic,
 };
 
 use super::query::effective_ref_ids;
@@ -51,7 +51,12 @@ pub(crate) fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
             errors.push(ValidationError::MissingVariableName);
         }
         match variable {
-            Variable::Query(variable) if variable.query.expression().trim().is_empty() => {
+            Variable::Query(variable)
+                if variable
+                    .query
+                    .expression()
+                    .is_none_or(|expression| expression.trim().is_empty()) =>
+            {
                 errors.push(ValidationError::MissingQueryExpression {
                     panel: format!("variable {}", variable.name),
                 });
@@ -101,10 +106,12 @@ pub(crate) fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
                     errors.push(ValidationError::MissingRowTitle);
                 }
                 for panel in &row.panels {
-                    validate_panel(panel, &mut ids, &mut errors);
+                    validate_panel(panel, dashboard.datasource.as_ref(), &mut ids, &mut errors);
                 }
             }
-            DashboardItem::Panel(panel) => validate_panel(panel, &mut ids, &mut errors),
+            DashboardItem::Panel(panel) => {
+                validate_panel(panel, dashboard.datasource.as_ref(), &mut ids, &mut errors);
+            }
         }
     }
     validate_variable_references(dashboard, &mut errors);
@@ -185,7 +192,9 @@ fn check_query(references: &mut References<'_>, query: &Query, errors: &mut Vec<
         Query::Raw(_) => Leeway::PluginMacros,
         Query::Prometheus(_) | Query::Loki(_) => Leeway::None,
     };
-    references.check("query expression", query.expression(), leeway, errors);
+    if let Some(expression) = query.expression() {
+        references.check("query expression", expression, leeway, errors);
+    }
     let options = query.options();
     if let Some(legend_format) = &options.legend_format {
         references.check("legend format", legend_format, Leeway::None, errors);
@@ -289,6 +298,7 @@ fn uid_problem(uid: &str) -> Option<&'static str> {
 
 pub(crate) fn validate_panel(
     panel: &Panel,
+    default_datasource: Option<&DataSource>,
     ids: &mut HashSet<u32>,
     errors: &mut Vec<ValidationError>,
 ) {
@@ -332,25 +342,31 @@ pub(crate) fn validate_panel(
         });
     }
 
-    let mut refs = HashSet::new();
-    for query in &panel.queries {
-        if query.expression().trim().is_empty() {
-            errors.push(ValidationError::MissingQueryExpression {
-                panel: panel.title.clone(),
-            });
-        }
-        if let Some(ref_id) = &query.options().ref_id
-            && !refs.insert(ref_id.clone())
-        {
-            errors.push(ValidationError::DuplicateQueryRefId {
-                panel: panel.title.clone(),
-                ref_id: ref_id.clone(),
-            });
-        }
-    }
-    if let Some(thresholds) = &panel.field_config.thresholds
-        && !thresholds_are_valid(thresholds)
-    {
+    validate_queries(panel, default_datasource, errors);
+
+    // One error per panel, however many threshold sets are wrong: the variant names the panel, not the set.
+    let property_thresholds = panel
+        .queries
+        .iter()
+        .flat_map(|query| &query.options().field_properties)
+        .chain(
+            panel
+                .field_config
+                .overrides
+                .iter()
+                .flat_map(|field_override| &field_override.properties),
+        )
+        .filter_map(|property| match property {
+            OverrideProperty::Thresholds(thresholds) => Some(thresholds),
+            _ => None,
+        });
+    let invalid_thresholds = panel
+        .field_config
+        .thresholds
+        .iter()
+        .chain(property_thresholds)
+        .any(|thresholds| !thresholds_are_valid(thresholds));
+    if invalid_thresholds {
         errors.push(ValidationError::InvalidThresholds {
             panel: panel.title.clone(),
         });
@@ -367,6 +383,52 @@ pub(crate) fn validate_panel(
             errors.push(ValidationError::UnknownOverrideRefId {
                 panel: panel.title.clone(),
                 ref_id: ref_id.clone(),
+            });
+        }
+    }
+}
+
+fn validate_queries(
+    panel: &Panel,
+    default_datasource: Option<&DataSource>,
+    errors: &mut Vec<ValidationError>,
+) {
+    // Grafana's mixed datasource only dispatches: `MixedDataSource.ts` drops every target whose own `datasource.uid` is `-- Mixed --`. A query on a mixed panel that inherits the panel's datasource would be dropped.
+    let mixed = panel
+        .datasource
+        .as_ref()
+        .or(default_datasource)
+        .is_some_and(DataSource::is_mixed);
+    let mut refs = HashSet::new();
+    for (query, ref_id) in panel.queries.iter().zip(effective_ref_ids(&panel.queries)) {
+        // A raw query may leave the expression out, as non-expression datasources do, but then it has to say something through its extra keys. An expression that is set must not be blank.
+        let missing_expression = match query.expression() {
+            Some(expression) => expression.trim().is_empty(),
+            None => query.raw_extra().is_none_or(BTreeMap::is_empty),
+        };
+        if missing_expression {
+            errors.push(ValidationError::MissingQueryExpression {
+                panel: panel.title.clone(),
+            });
+        }
+        if let Some(explicit) = &query.options().ref_id
+            && !refs.insert(explicit.clone())
+        {
+            errors.push(ValidationError::DuplicateQueryRefId {
+                panel: panel.title.clone(),
+                ref_id: explicit.clone(),
+            });
+        }
+        if matches!(query, Query::Loki(_)) && query.options().query_type == Some(QueryType::Both) {
+            errors.push(ValidationError::UnsupportedQueryType {
+                panel: panel.title.clone(),
+                ref_id: ref_id.clone(),
+            });
+        }
+        if mixed && query.options().datasource.is_none() {
+            errors.push(ValidationError::MissingMixedQueryDataSource {
+                panel: panel.title.clone(),
+                ref_id,
             });
         }
     }
@@ -415,6 +477,7 @@ fn validate_transformation(
         Transformation::JoinByField(_)
         | Transformation::SortBy(_)
         | Transformation::LabelsToFields(_)
+        | Transformation::RenameByRegex(_)
         | Transformation::Raw(_) => {}
     }
 
@@ -474,19 +537,9 @@ fn validate_organize_order(
 }
 
 pub(crate) fn thresholds_are_valid(thresholds: &Thresholds) -> bool {
-    let mut previous = None;
-    for (index, step) in thresholds.steps.iter().enumerate() {
-        match step.value {
-            None if index == 0 => {}
-            None => return false,
-            Some(value) if !value.is_finite() => return false,
-            Some(value) => {
-                if previous.is_some_and(|previous| value <= previous) {
-                    return false;
-                }
-                previous = Some(value);
-            }
-        }
-    }
-    true
+    thresholds.steps.iter().all(|step| step.value.is_finite())
+        && thresholds
+            .steps
+            .windows(2)
+            .all(|pair| pair[0].value < pair[1].value)
 }

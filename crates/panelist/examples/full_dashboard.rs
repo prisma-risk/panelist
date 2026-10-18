@@ -50,8 +50,7 @@ fn main() -> panelist::Result<()> {
                 unit: percent_unit;
                 width: 6;
 
-                thresholds {
-                    red: 0.0;
+                thresholds(red) {
                     yellow: 0.99;
                     green: 0.999;
                 }
