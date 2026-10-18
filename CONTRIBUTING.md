@@ -80,18 +80,32 @@ screenshot: `make render-examples` regenerates every image in
 
 ## Releases
 
-Releases run through [release-plz](https://release-plz.dev/):
+The `Release` workflow accepts an exact reviewed source commit, a stable
+version and public release notes from the configured release dispatcher.
+The repository variable `RELEASE_DISPATCH_ACTOR` identifies that dispatcher;
+maintainers manage its value outside the source tree. Ordinary pushes do not
+publish a release.
 
-Do not edit `CHANGELOG.md` files by hand. The required changelog-ownership workflow permits only release PRs authored by `prismarisk-public-release[bot]` to change them.
+The preparation job validates the source and packages the selected version
+without publishing credentials. The publish job consumes that same run's
+verified archive, reconciles its checksum against crates.io, and creates a
+signed annotated `vX.Y.Z` tag and matching GitHub Release. Tag signing uses the
+workflow's existing GitHub Actions OIDC identity. The `crates-io` environment
+holds the crate publishing token and public release App credentials.
 
-1. Land release-worthy changes on `main` with a `feat:`, `fix:`, `perf:`, or `refactor:` Conventional Commit prefix.
-2. Dispatch the `release-plz` workflow to open or update the release PR. It owns the workspace version and `crates/panelist/CHANGELOG.md` changes.
-3. Review and merge the release PR. Its merge automatically creates a signed `vX.Y.Z` tag, publishes Panelist to crates.io, and creates the matching GitHub Release.
-4. Verify the release workflow, crates.io publication, signed tag, and GitHub Release.
+Release commits contain only the versioned workspace manifest and lockfile,
+with their reviewed source commit recorded as provenance. The workflow never
+pushes a version commit to `main`. Changelogs remain historical release records;
+new release notes are reviewed in the release request.
 
-Release PR creation is manual. The publish phase runs automatically only when a push to `main` changes a release-plz-owned `CHANGELOG.md`; ordinary changes to `main` do not run it.
+Run `python3 -m unittest discover -s scripts -p 'test_release*.py'` after changing
+release tooling, and `make release-dry-run` before changing crate metadata.
+An existing version or tag is never replaced. After a partial failure, inspect
+crates.io, the signed tag and GitHub Release before rerunning the same request.
 
-`panelist` and `panelist-macros` release together at the same version, and `panelist` pins `panelist-macros` exactly. Before changing publish metadata, run `make release-dry-run` to validate both crate archives exactly as crates.io will receive them. The publish job is the only job that receives `CARGO_REGISTRY_TOKEN`.
+Public release configuration must contain only public repository information,
+public endpoints and generic input names. Keep private infrastructure,
+repository references, dispatcher identities and credentials outside this tree.
 
 ## Developer Certificate of Origin
 
