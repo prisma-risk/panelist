@@ -27,16 +27,18 @@ use serde_json::{Value, json};
 
 use crate::{
     AxisPlacement, DataSource, GridPos, HeatmapColorMode, HeatmapColorScheme, Legend, LegendMode,
-    LegendPlacement, Panel, PanelKind, ReduceOptions, Row, TextMode, Tooltip, panel::PanelOptions,
+    LegendPlacement, Panel, PanelKind, ReduceOptions, Repeat, Row, TextMode, Tooltip,
+    panel::PanelOptions,
 };
 
 use super::field::normalize_field_config;
+use super::link::GrafanaDataLink;
 use super::query::normalize_targets;
 use super::vocabulary::{
     bar_gauge_display_mode, orientation, plugin_id, reducer, stat_color_mode, stat_graph_mode,
     text_mode, tooltip_mode, tooltip_sort,
 };
-use super::wire::{GrafanaGridPos, GrafanaLink, GrafanaPanel};
+use super::wire::{GrafanaGridPos, GrafanaPanel};
 
 pub(crate) fn tooltip_value(tooltip: Tooltip) -> Value {
     json!({
@@ -77,6 +79,15 @@ pub(crate) fn normalize_row(row: &Row, id: u32, y: u16, panels: Vec<GrafanaPanel
         options: None,
         transparent: false,
         links: Vec::new(),
+        interval: None,
+        max_data_points: None,
+        time_from: None,
+        time_shift: None,
+        hide_time_override: false,
+        // Classic rows repeat by variable name only: `#RowPanel` has no direction or `maxPerRow`.
+        repeat: row.repeat.clone(),
+        repeat_direction: None,
+        max_per_row: None,
         collapsed: Some(row.collapsed),
         panels,
         extra: BTreeMap::new(),
@@ -108,6 +119,13 @@ pub(crate) fn normalize_panel(
     let mut options = default_panel_options(panel);
     options.extend(typed_panel_options(&panel.kind_options));
     options.extend(panel.raw_options.clone());
+    let query_options = &panel.query_options;
+    // Grafana saves `repeatDirection` with every repeat, and `maxPerRow` only for a horizontal one.
+    let (repeat_direction, max_per_row) = match &panel.repeat {
+        Some(Repeat::Horizontal(repeat)) => (Some("h"), repeat.max_per_row),
+        Some(Repeat::Vertical(_)) => (Some("v"), None),
+        None => (None, None),
+    };
 
     GrafanaPanel {
         id,
@@ -129,7 +147,18 @@ pub(crate) fn normalize_panel(
         )),
         options: Some(options),
         transparent: panel.transparent,
-        links: panel.links.iter().map(GrafanaLink::from).collect(),
+        links: panel.links.iter().map(GrafanaDataLink::from).collect(),
+        interval: query_options.min_interval.clone(),
+        max_data_points: query_options.max_data_points,
+        time_from: query_options.time_from.clone(),
+        time_shift: query_options.time_shift.clone(),
+        hide_time_override: query_options.hide_time_override,
+        repeat: panel
+            .repeat
+            .as_ref()
+            .map(|repeat| repeat.variable().to_owned()),
+        repeat_direction,
+        max_per_row,
         collapsed: None,
         panels: Vec::new(),
         extra: panel.extra.clone(),

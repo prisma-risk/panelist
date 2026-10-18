@@ -27,8 +27,8 @@ use serde::{Serialize, Serializer};
 use serde_json::Value;
 
 use crate::{
-    DataSource, Error, GrafanaTarget, Panel, Result, Variable, grafana,
-    validation::ValidationErrors,
+    Annotation, BuiltInAnnotation, DataSource, Error, GrafanaTarget, Panel, Result, Variable,
+    grafana, validation::ValidationErrors,
 };
 
 /// How Panelist assigns numeric IDs to panels and rows that do not set one.
@@ -121,7 +121,9 @@ impl Default for TimeRange {
     }
 }
 
-/// A dashboard or panel navigation link.
+/// A navigation link in the dashboard's top bar.
+///
+/// Panel header links and field links use [`crate::DataLink`] instead: Grafana renders those through a different link model that ignores this type's tooltip, tags, and variable options.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DashboardLink {
     pub(crate) title: String,
@@ -190,6 +192,7 @@ pub struct Row {
     pub(crate) title: String,
     pub(crate) key: Option<String>,
     pub(crate) collapsed: bool,
+    pub(crate) repeat: Option<String>,
     pub(crate) panels: Vec<Panel>,
 }
 
@@ -201,6 +204,7 @@ impl Row {
             title: title.into(),
             key: None,
             collapsed: false,
+            repeat: None,
             panels: Vec::new(),
         }
     }
@@ -218,6 +222,15 @@ impl Row {
     #[must_use]
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
+        self
+    }
+
+    /// Repeats the row, with all its panels, for each selected value of the named dashboard variable.
+    ///
+    /// The name is the bare variable name, `region` rather than `$region`. Grafana expands the repeat when the dashboard loads, cloning the row below itself, so Panelist lays out the authored row once.
+    #[must_use]
+    pub fn repeat(mut self, variable: impl Into<String>) -> Self {
+        self.repeat = Some(variable.into());
         self
     }
 
@@ -269,6 +282,8 @@ pub struct Dashboard {
     pub(crate) datasource: Option<DataSource>,
     pub(crate) variables: Vec<Variable>,
     pub(crate) links: Vec<DashboardLink>,
+    pub(crate) annotations: Vec<Annotation>,
+    pub(crate) built_in_annotation: Option<BuiltInAnnotation>,
     pub(crate) items: Vec<DashboardItem>,
     pub(crate) extra: BTreeMap<String, Value>,
 }
@@ -294,6 +309,8 @@ impl Dashboard {
             datasource: None,
             variables: Vec::new(),
             links: Vec::new(),
+            annotations: Vec::new(),
+            built_in_annotation: None,
             items: Vec::new(),
             extra: BTreeMap::new(),
         }
@@ -410,6 +427,22 @@ impl Dashboard {
     #[must_use]
     pub fn link(mut self, link: DashboardLink) -> Self {
         self.links.push(link);
+        self
+    }
+
+    /// Appends an annotation query.
+    #[must_use]
+    pub fn annotation(mut self, annotation: impl Into<Annotation>) -> Self {
+        self.annotations.push(annotation.into());
+        self
+    }
+
+    /// Configures Grafana's built-in "Annotations & Alerts" query and emits it first in the annotation list.
+    ///
+    /// Without this, Panelist emits only the authored annotations and Grafana adds the built-in entry with its defaults when the dashboard loads.
+    #[must_use]
+    pub fn built_in_annotation(mut self, built_in: BuiltInAnnotation) -> Self {
+        self.built_in_annotation = Some(built_in);
         self
     }
 
