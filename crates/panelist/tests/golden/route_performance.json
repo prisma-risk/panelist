@@ -496,7 +496,7 @@
           "id": "joinByField",
           "options": {
             "byField": "route",
-            "mode": "outerTabular"
+            "mode": "outer"
           }
         },
         {
