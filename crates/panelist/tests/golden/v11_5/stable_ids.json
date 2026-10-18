@@ -1,0 +1,224 @@
+{
+  "id": null,
+  "uid": "golden-stable-ids",
+  "title": "Stable IDs",
+  "tags": [],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "id": 40433976,
+      "type": "text",
+      "title": "About",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-main"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "content": "Panel IDs here survive reordering.",
+        "mode": "markdown"
+      }
+    },
+    {
+      "id": 366244660,
+      "type": "row",
+      "title": "Traffic",
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 463514126,
+      "type": "stat",
+      "title": "Requests",
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 6,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-main"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-main"
+          },
+          "expr": "sum(rate(requests_total[5m]))",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 268296560,
+      "type": "timeseries",
+      "title": "Errors",
+      "gridPos": {
+        "x": 6,
+        "y": 7,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-main"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-main"
+          },
+          "expr": "sum(rate(errors_total[5m]))",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 847890310,
+      "type": "row",
+      "title": "Details",
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 121479201,
+          "type": "timeseries",
+          "title": "Latency",
+          "gridPos": {
+            "x": 0,
+            "y": 16,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-main"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-main"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(latency_seconds_bucket[5m])))",
+              "hide": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "showPoints": "auto",
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "schemaVersion": 40,
+  "version": 0,
+  "links": []
+}

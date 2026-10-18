@@ -10,24 +10,43 @@
 # acceptance: it walks every leaf of the dashboard we sent and asserts that
 # leaf still exists, unchanged, in the dashboard Grafana hands back.
 #
-# Usage: scripts/verify-grafana.sh
+# Each GrafanaTarget has its own golden directory, rendered for that target,
+# and its own Grafana release. Every target's goldens go through that
+# target's release, one fresh container per release.
+#
+# Usage: scripts/verify-grafana.sh [release ...]
+#
+# With no arguments every target is verified. Naming releases (for example
+# `scripts/verify-grafana.sh 11.5.2`) verifies only those. Set
+# VERIFY_GRAFANA_PORT and VERIFY_GRAFANA_CONTAINER to avoid a port or
+# container name already in use.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+GOLDEN_ROOT="${REPO_ROOT}/crates/panelist/tests/golden"
 
-GRAFANA_IMAGE="grafana/grafana-oss:13.0.2"
-CONTAINER_NAME="panelist-verify-grafana"
-GRAFANA_PORT=3000
+# One "release=golden directory" pair per GrafanaTarget. The release must
+# match GrafanaTarget::verified_release and the directory must match
+# golden_dir in crates/panelist/tests/golden.rs.
+TARGETS=(
+  "11.5.2=${GOLDEN_ROOT}/v11_5"
+  "13.0.2=${GOLDEN_ROOT}"
+)
+
+GOLDEN_NAMES=(
+  "basic.json"
+  "route_performance.json"
+  "stable_ids.json"
+)
+
+# Override these to run beside another Grafana, or another run of this script.
+CONTAINER_NAME="${VERIFY_GRAFANA_CONTAINER:-panelist-verify-grafana}"
+GRAFANA_PORT="${VERIFY_GRAFANA_PORT:-3000}"
 BASE_URL="http://localhost:${GRAFANA_PORT}"
 HEALTH_TIMEOUT_SECONDS=90
 HEALTH_POLL_INTERVAL_SECONDS=2
-
-GOLDEN_FILES=(
-  "${REPO_ROOT}/crates/panelist/tests/golden/basic.json"
-  "${REPO_ROOT}/crates/panelist/tests/golden/route_performance.json"
-)
 
 WORK_DIR="$(mktemp -d)"
 COMPARE_JQ="${WORK_DIR}/compare.jq"
@@ -46,28 +65,41 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
-echo "==> Booting ${GRAFANA_IMAGE} on port ${GRAFANA_PORT}"
-docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
-docker run -d \
-  --name "${CONTAINER_NAME}" \
-  -p "${GRAFANA_PORT}:3000" \
-  -e GF_AUTH_ANONYMOUS_ENABLED=true \
-  -e GF_AUTH_ANONYMOUS_ORG_ROLE=Admin \
-  "${GRAFANA_IMAGE}" >/dev/null
+# Boots a fresh Grafana for one release and waits for its database. Exits
+# the whole run on a boot failure: the remaining targets would fail the same
+# way, and a partial PASS must not read as a full one.
+boot_grafana() {
+  local image="grafana/grafana-oss:$1"
+  echo
+  echo "==> Booting ${image} on port ${GRAFANA_PORT}"
+  docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  docker run -d \
+    --name "${CONTAINER_NAME}" \
+    -p "${GRAFANA_PORT}:3000" \
+    -e GF_AUTH_ANONYMOUS_ENABLED=true \
+    -e GF_AUTH_ANONYMOUS_ORG_ROLE=Admin \
+    "${image}" >/dev/null
 
-echo "==> Waiting for Grafana to report a healthy database (timeout ${HEALTH_TIMEOUT_SECONDS}s)"
-elapsed=0
-until curl -fsS "${BASE_URL}/api/health" 2>/dev/null | jq -e '.database == "ok"' >/dev/null 2>&1; do
-  if [ "${elapsed}" -ge "${HEALTH_TIMEOUT_SECONDS}" ]; then
-    echo "FAILED: Grafana did not report a healthy database within ${HEALTH_TIMEOUT_SECONDS}s." >&2
-    echo "Container logs:" >&2
-    docker logs "${CONTAINER_NAME}" >&2 || true
+  echo "==> Waiting for Grafana to report a healthy database (timeout ${HEALTH_TIMEOUT_SECONDS}s)"
+  local elapsed=0
+  until curl -fsS "${BASE_URL}/api/health" 2>/dev/null | jq -e '.database == "ok"' >/dev/null 2>&1; do
+    if [ "${elapsed}" -ge "${HEALTH_TIMEOUT_SECONDS}" ]; then
+      echo "FAILED: ${image} did not report a healthy database within ${HEALTH_TIMEOUT_SECONDS}s." >&2
+      echo "Container logs:" >&2
+      docker logs "${CONTAINER_NAME}" >&2 || true
+      exit 1
+    fi
+    sleep "${HEALTH_POLL_INTERVAL_SECONDS}"
+    elapsed=$((elapsed + HEALTH_POLL_INTERVAL_SECONDS))
+  done
+  local reported
+  reported="$(curl -fsS "${BASE_URL}/api/health" | jq -r '.version')"
+  if [ "${reported}" != "$1" ]; then
+    echo "FAILED: ${image} reports version ${reported}, not $1." >&2
     exit 1
   fi
-  sleep "${HEALTH_POLL_INTERVAL_SECONDS}"
-  elapsed=$((elapsed + HEALTH_POLL_INTERVAL_SECONDS))
-done
-echo "==> Grafana is healthy"
+  echo "==> Grafana ${reported} is healthy"
+}
 
 # Walks $sent in two disjoint categories and checks each against $got to a
 # standard appropriate for what Grafana is allowed to do to it:
@@ -214,69 +246,93 @@ def resolve($doc; $path):
 JQ
 
 overall_status=0
+selected=("$@")
+verified=0
 
-for golden in "${GOLDEN_FILES[@]}"; do
-  name="$(basename "${golden}")"
-  uid="$(jq -r '.uid' "${golden}")"
-  echo
-  echo "==> Round-tripping ${name} (uid: ${uid})"
-
-  request_body="${WORK_DIR}/${name}.request.json"
-  jq -n --slurpfile dashboard "${golden}" '{dashboard: $dashboard[0], overwrite: true}' \
-    >"${request_body}"
-
-  post_response="${WORK_DIR}/${name}.post-response.json"
-  post_status="$(curl -sS -o "${post_response}" -w '%{http_code}' \
-    -X POST "${BASE_URL}/api/dashboards/db" \
-    -H "Content-Type: application/json" \
-    -d @"${request_body}")"
-
-  if [ "${post_status}" != "200" ]; then
-    echo "FAIL: ${name} — POST /api/dashboards/db returned HTTP ${post_status}" >&2
-    cat "${post_response}" >&2
-    overall_status=1
+for target in "${TARGETS[@]}"; do
+  release="${target%%=*}"
+  golden_dir="${target#*=}"
+  if [ "${#selected[@]}" -gt 0 ] && [[ " ${selected[*]} " != *" ${release} "* ]]; then
     continue
   fi
+  verified=$((verified + 1))
+  boot_grafana "${release}"
 
-  returned_uid="$(jq -r '.uid' "${post_response}")"
+  for golden_name in "${GOLDEN_NAMES[@]}"; do
+    golden="${golden_dir}/${golden_name}"
+    name="${release}/${golden_name}"
+    if [ ! -f "${golden}" ]; then
+      echo "FAIL: ${name} — golden file ${golden} does not exist" >&2
+      overall_status=1
+      continue
+    fi
+    uid="$(jq -r '.uid' "${golden}")"
+    schema_version="$(jq -r '.schemaVersion' "${golden}")"
+    echo
+    echo "==> Round-tripping ${name} (uid: ${uid}, schemaVersion: ${schema_version})"
 
-  get_response="${WORK_DIR}/${name}.get-response.json"
-  get_status="$(curl -sS -o "${get_response}" -w '%{http_code}' \
-    "${BASE_URL}/api/dashboards/uid/${returned_uid}")"
+    request_body="${WORK_DIR}/${release}-${golden_name}.request.json"
+    jq -n --slurpfile dashboard "${golden}" '{dashboard: $dashboard[0], overwrite: true}' \
+      >"${request_body}"
 
-  if [ "${get_status}" != "200" ]; then
-    echo "FAIL: ${name} — GET /api/dashboards/uid/${returned_uid} returned HTTP ${get_status}" >&2
-    cat "${get_response}" >&2
-    overall_status=1
-    continue
-  fi
+    post_response="${WORK_DIR}/${release}-${golden_name}.post-response.json"
+    post_status="$(curl -sS -o "${post_response}" -w '%{http_code}' \
+      -X POST "${BASE_URL}/api/dashboards/db" \
+      -H "Content-Type: application/json" \
+      -d @"${request_body}")"
 
-  got_dashboard="${WORK_DIR}/${name}.got-dashboard.json"
-  jq '.dashboard' "${get_response}" >"${got_dashboard}"
+    if [ "${post_status}" != "200" ]; then
+      echo "FAIL: ${name} — POST /api/dashboards/db returned HTTP ${post_status}" >&2
+      cat "${post_response}" >&2
+      overall_status=1
+      continue
+    fi
 
-  result="$(jq -n \
-    --slurpfile sent "${golden}" \
-    --slurpfile got "${got_dashboard}" \
-    -f "${COMPARE_JQ}")"
+    returned_uid="$(jq -r '.uid' "${post_response}")"
 
-  leaves_checked="$(echo "${result}" | jq -r '.leaves_checked')"
-  containers_checked="$(echo "${result}" | jq -r '.containers_checked')"
-  problem_count="$(echo "${result}" | jq -r '.problems | length')"
+    get_response="${WORK_DIR}/${release}-${golden_name}.get-response.json"
+    get_status="$(curl -sS -o "${get_response}" -w '%{http_code}' \
+      "${BASE_URL}/api/dashboards/uid/${returned_uid}")"
 
-  if [ "$((leaves_checked + containers_checked))" -eq 0 ]; then
-    echo "FAIL: ${name} — 0 leaf properties and 0 empty containers found to check; the golden or the response is empty or degenerate" >&2
-    overall_status=1
-    continue
-  fi
+    if [ "${get_status}" != "200" ]; then
+      echo "FAIL: ${name} — GET /api/dashboards/uid/${returned_uid} returned HTTP ${get_status}" >&2
+      cat "${get_response}" >&2
+      overall_status=1
+      continue
+    fi
 
-  if [ "${problem_count}" -eq 0 ]; then
-    echo "PASS: ${name} — ${leaves_checked} leaf properties and ${containers_checked} empty containers checked, all preserved"
-  else
-    echo "FAIL: ${name} — Grafana dropped, altered, retyped, or blocked access to ${problem_count} of $((leaves_checked + containers_checked)) properties (${leaves_checked} leaves, ${containers_checked} empty containers):"
-    echo "${result}" | jq -r '.problems[] | "  [\(.kind)] \(.path)\n    expected: \(.expected | tojson)\n    actual:   \(.actual | tojson)"'
-    overall_status=1
-  fi
+    got_dashboard="${WORK_DIR}/${release}-${golden_name}.got-dashboard.json"
+    jq '.dashboard' "${get_response}" >"${got_dashboard}"
+
+    result="$(jq -n \
+      --slurpfile sent "${golden}" \
+      --slurpfile got "${got_dashboard}" \
+      -f "${COMPARE_JQ}")"
+
+    leaves_checked="$(echo "${result}" | jq -r '.leaves_checked')"
+    containers_checked="$(echo "${result}" | jq -r '.containers_checked')"
+    problem_count="$(echo "${result}" | jq -r '.problems | length')"
+
+    if [ "$((leaves_checked + containers_checked))" -eq 0 ]; then
+      echo "FAIL: ${name} — 0 leaf properties and 0 empty containers found to check; the golden or the response is empty or degenerate" >&2
+      overall_status=1
+      continue
+    fi
+
+    if [ "${problem_count}" -eq 0 ]; then
+      echo "PASS: ${name} — ${leaves_checked} leaf properties and ${containers_checked} empty containers checked, all preserved"
+    else
+      echo "FAIL: ${name} — Grafana dropped, altered, retyped, or blocked access to ${problem_count} of $((leaves_checked + containers_checked)) properties (${leaves_checked} leaves, ${containers_checked} empty containers):"
+      echo "${result}" | jq -r '.problems[] | "  [\(.kind)] \(.path)\n    expected: \(.expected | tojson)\n    actual:   \(.actual | tojson)"'
+      overall_status=1
+    fi
+  done
 done
+
+if [ "${verified}" -eq 0 ]; then
+  echo "FAILED: no target matches the requested release(s): ${selected[*]}" >&2
+  exit 1
+fi
 
 echo
 if [ "${overall_status}" -eq 0 ]; then
