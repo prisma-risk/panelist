@@ -36,8 +36,8 @@ use crate::{
     diag::{suggest, unknown_word},
     lower::Cx,
     spec::{
-        COLOR, COLOR_SCHEME, REDUCER, THRESHOLD_KEYS, THRESHOLD_MODE, THRESHOLD_NAMED_STEPS, UNIT,
-        Vocab,
+        COLOR, COLOR_SCHEME, CONTINUOUS_PALETTE, CURRENCY, REDUCER, SPECIAL_VALUE, THRESHOLD_KEYS,
+        THRESHOLD_MODE, UNIT, Vocab,
     },
     tokens::{Expr, Stop, Tokens},
 };
@@ -60,16 +60,32 @@ fn word_or(cx: &mut Cx, vocab: &Vocab, value: &Expr, also: &[&str]) -> Option<To
     }
 }
 
-/// A unit word, `custom(<expr>)`, or an expression of type `Unit`.
+/// A unit word, `currency(<currency>)`, `custom(<expr>)`, or an expression
+/// of type `Unit`.
 pub(crate) fn unit(cx: &mut Cx, value: &Expr) -> Option<TokenStream> {
-    if let Some((name, inner)) = value.as_call()
-        && name == "custom"
-    {
+    if let Some((name, inner)) = value.as_call() {
         let ty = cx.path("Unit", name.span());
-        let method = Ident::new("custom", name.span());
-        return Some(quote!(#ty::#method(#inner)));
+        if name == "custom" {
+            let method = Ident::new("custom", name.span());
+            return Some(quote!(#ty::#method(#inner)));
+        }
+        if name == "currency" {
+            let currency = word(cx, &CURRENCY, &inner)?;
+            return Some(quote!(#ty::Currency(#currency)));
+        }
     }
-    word_or(cx, &UNIT, value, &["custom(<unit>)"])
+    word_or(
+        cx,
+        &UNIT,
+        value,
+        &["currency(<currency>)", "custom(<unit>)"],
+    )
+}
+
+/// A special-value word such as `null`, or an expression of type
+/// `SpecialValue`.
+pub(crate) fn special_value(cx: &mut Cx, value: &Expr) -> Option<TokenStream> {
+    word(cx, &SPECIAL_VALUE, value)
 }
 
 /// A color word, a string naming any other color, or an expression of type
@@ -91,15 +107,20 @@ pub(crate) fn color_scheme(cx: &mut Cx, value: &Expr) -> Option<TokenStream> {
             let color = color(cx, &inner)?;
             return Some(quote!(#ty::Fixed(#color)));
         }
+        if name == "shades" {
+            let color = color(cx, &inner)?;
+            return Some(quote!(#ty::Shades(#color)));
+        }
         if name == "continuous" {
-            return Some(quote!(#ty::Continuous(::core::convert::Into::into(#inner))));
+            let palette = word(cx, &CONTINUOUS_PALETTE, &inner)?;
+            return Some(quote!(#ty::Continuous(#palette)));
         }
     }
     word_or(
         cx,
         &COLOR_SCHEME,
         value,
-        &["fixed(<color>)", "continuous(<palette>)"],
+        &["fixed(<color>)", "shades(<color>)", "continuous(<palette>)"],
     )
 }
 
@@ -118,105 +139,90 @@ pub(crate) fn reducers(cx: &mut Cx, value: &Expr) -> Option<TokenStream> {
 /// One entry of a thresholds block.
 enum Threshold {
     Base(TokenStream, Span),
-    Step(TokenStream, TokenStream, Span),
-    Named(Ident, Expr),
-    Mode(TokenStream),
+    Mode(TokenStream, Span),
+    Step(TokenStream, TokenStream),
 }
 
-/// The thresholds a block with a `base:` starts from. Kept in one place so
-/// the base-first constructor is the only line that changes if the builder
-/// grows one.
-fn with_base(cx: &Cx, base: &TokenStream) -> TokenStream {
-    let ty = cx.path("Thresholds", Span::call_site());
-    quote!(#ty::new().step(#base, ::core::option::Option::<f64>::None))
-}
-
-/// Lowers a thresholds block to an expression of type `Thresholds`.
+/// Lowers a thresholds block to an expression of type `Thresholds`, or
+/// `None` when it has no base color and that has been reported.
 ///
-/// Two grammars are accepted, but not mixed. The general one is a mandatory
-/// `base: <color>;` followed by `<value> => <color>;` steps in ascending
-/// order. The named form, `green: <value>;`, `yellow: …`, `red: …`, is the
-/// original shorthand and keeps building exactly what it always did.
-pub(crate) fn thresholds(cx: &mut Cx, keyword: &Ident, group: &Group) -> TokenStream {
+/// A threshold set always has a base color, the color below the lowest
+/// step. It is written either in parentheses, `thresholds(<color>) { … }`,
+/// or as `base: <color>;` inside the block. Steps are `<value> => <color>;`,
+/// which takes any color, or `<color word>: <value>;`. `mode: percentage;`
+/// switches from absolute values to percentages.
+pub(crate) fn thresholds(
+    cx: &mut Cx,
+    keyword: &Ident,
+    base: Option<&Expr>,
+    group: &Group,
+) -> Option<TokenStream> {
     let mut tokens = Tokens::inside(group);
     let mut entries = Vec::new();
+    // A rejected entry may have been the base, so a missing base is only
+    // reported for a block that is otherwise clean.
+    let mut rejected = false;
     while !tokens.is_empty() {
         if tokens.eat_punct(';') {
             continue;
         }
         match threshold_entry(cx, &mut tokens) {
             Ok(Some(entry)) => entries.push(entry),
-            Ok(None) => {}
+            Ok(None) => rejected = true,
             Err(error) => {
+                rejected = true;
                 cx.error(error);
                 tokens.recover();
             }
         }
     }
 
-    let mut base = None;
-    let mut first_step = None;
-    for entry in &entries {
+    let mut base = base.and_then(|base| color(cx, base));
+    let mut written_base = None;
+    let mut mode = None;
+    let mut steps = TokenStream::new();
+    let var = Ident::new("__panelist_thresholds", Span::mixed_site());
+    for entry in entries {
         match entry {
             Threshold::Base(color, span) => {
-                if base.is_some() {
-                    cx.error(syn::Error::new(*span, "thresholds take one `base:`"));
-                } else if first_step.is_some() {
-                    cx.error(syn::Error::new(
-                        *span,
-                        "`base:` must come before the `<value> => <color>;` steps",
-                    ));
+                if base.is_some() || written_base.is_some() {
+                    cx.error(syn::Error::new(span, "thresholds take one base color"));
+                } else {
+                    written_base = Some(color);
                 }
-                base.get_or_insert_with(|| color.clone());
             }
-            Threshold::Step(_, _, span) => {
-                first_step.get_or_insert(*span);
+            Threshold::Mode(value, span) => {
+                if mode.is_some() {
+                    cx.error(syn::Error::new(span, "thresholds take one `mode:`"));
+                } else {
+                    mode = Some(value);
+                }
             }
-            Threshold::Named(..) | Threshold::Mode(_) => {}
+            Threshold::Step(value, color) => steps.extend(quote!(
+                let #var = #var.step(<f64 as ::core::convert::From<_>>::from(#value), #color);
+            )),
         }
     }
-    if let (None, Some(span)) = (&base, first_step) {
-        cx.error(syn::Error::new(
-            span,
-            "thresholds with `<value> => <color>;` steps need a `base: <color>;` first, the color below the lowest step",
-        ));
-    }
-    let general = base.is_some() || first_step.is_some();
-    for entry in &entries {
-        if let (true, Threshold::Named(name, _)) = (general, entry) {
-            cx.error(syn::Error::new(
-                name.span(),
-                format!(
-                    "`{name}:` cannot be mixed with `base:` and `<value> => <color>;` steps; write `<value> => {name};`"
-                ),
-            ));
-        }
-    }
-
-    let var = Ident::new("__panelist_thresholds", Span::mixed_site());
-    let init = match &base {
-        Some(base) => with_base(cx, base),
-        None => {
-            let ty = cx.path("Thresholds", keyword.span());
-            quote!(#ty::new())
+    base = base.or(written_base);
+    let ty = cx.path("Thresholds", keyword.span());
+    let init = match (base, mode) {
+        (Some(base), None) => quote!(#ty::absolute(#base)),
+        (Some(base), Some(mode)) => quote!(#ty::new(#mode, #base)),
+        (None, _) => {
+            if !rejected {
+                cx.error(syn::Error::new(
+                    keyword.span(),
+                    "thresholds need a base color, the color below the lowest step: write `thresholds(<color>) { … }` or put `base: <color>;` in the block",
+                ));
+            }
+            return None;
         }
     };
-    let mut statements = TokenStream::new();
-    for entry in entries {
-        statements.extend(match entry {
-            Threshold::Base(..) => continue,
-            Threshold::Step(value, color, _) => {
-                quote!(let #var = #var.step(#color, <f64 as ::core::convert::From<_>>::from(#value));)
-            }
-            Threshold::Named(name, value) => quote!(let #var = #var.#name(#value);),
-            Threshold::Mode(mode) => quote!(let #var = #var.mode(#mode);),
-        });
-    }
-    quote!({
+    Some(quote!({
         let #var = #init;
-        #statements
+        #steps
         #var
-    })
+    }))
 }
 
 fn threshold_entry(cx: &mut Cx, tokens: &mut Tokens) -> syn::Result<Option<Threshold>> {
@@ -224,27 +230,33 @@ fn threshold_entry(cx: &mut Cx, tokens: &mut Tokens) -> syn::Result<Option<Thres
         let key = tokens.expect_ident("a thresholds key")?;
         tokens.expect_colon(&key)?;
         let name = key.to_string();
-        if !THRESHOLD_KEYS.contains(&name.as_str()) {
-            let mut message = format!("unknown thresholds key `{name}`");
-            if let Some(close) = suggest(&name, THRESHOLD_KEYS.iter().copied()) {
-                message.push_str(&format!("; did you mean `{close}`?"));
-            }
-            message.push_str(
-                "\naccepted: `base: <color>;`, `mode: absolute | percentage;`, and steps written `<value> => <color>;`",
-            );
-            return Err(syn::Error::new(key.span(), message));
-        }
         let value = value(tokens, &key)?;
         return Ok(match name.as_str() {
             "base" => color(cx, &value).map(|color| Threshold::Base(color, key.span())),
-            "mode" => word(cx, &THRESHOLD_MODE, &value).map(Threshold::Mode),
-            _ => {
-                let method = THRESHOLD_NAMED_STEPS
-                    .iter()
-                    .find(|(named, _)| *named == name)
-                    .map_or("step", |(_, method)| *method);
-                Some(Threshold::Named(Ident::new(method, key.span()), value))
+            "mode" => {
+                word(cx, &THRESHOLD_MODE, &value).map(|mode| Threshold::Mode(mode, key.span()))
             }
+            _ => match COLOR.variant(&name) {
+                Some(variant) => Some(Threshold::Step(
+                    value.to_token_stream(),
+                    cx.variant(COLOR.ty, variant, key.span()),
+                )),
+                None => {
+                    let candidates = THRESHOLD_KEYS
+                        .iter()
+                        .copied()
+                        .chain(COLOR.words.iter().map(|(word, _)| *word));
+                    let mut message = format!("unknown thresholds key `{name}`");
+                    if let Some(close) = suggest(&name, candidates) {
+                        message.push_str(&format!("; did you mean `{close}`?"));
+                    }
+                    message.push_str(
+                        "\naccepted: `base: <color>;`, `mode: absolute | percentage;`, steps written `<value> => <color>;`, and `<color word>: <value>;` for `green`, `yellow`, `red`, `blue`, `orange`, or `purple`",
+                    );
+                    cx.error(syn::Error::new(key.span(), message));
+                    None
+                }
+            },
         });
     }
 
@@ -258,12 +270,7 @@ fn threshold_entry(cx: &mut Cx, tokens: &mut Tokens) -> syn::Result<Option<Thres
         return Err(tokens.error("expected a color after `=>`"));
     }
     tokens.expect_semi("the threshold color")?;
-    let span = step
-        .to_token_stream()
-        .into_iter()
-        .next()
-        .map_or_else(Span::call_site, |tree| tree.span());
-    Ok(color(cx, &target).map(|color| Threshold::Step(step.to_token_stream(), color, span)))
+    Ok(color(cx, &target).map(|color| Threshold::Step(step.to_token_stream(), color)))
 }
 
 /// Reads `<expr>;` after a key, checking that the value is not empty before

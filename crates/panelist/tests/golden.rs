@@ -44,7 +44,7 @@ fn golden_dashboard() -> Dashboard {
                 query: promql!("avg(up{region=\"$region\"})");
                 unit: percent;
                 width: 8;
-                thresholds {
+                thresholds(red) {
                     red: 0.0;
                     yellow: 99.0;
                     green: 99.9;
@@ -128,6 +128,7 @@ fn targets_differ_only_in_gated_properties() {
         golden_dashboard(),
         route_performance_dashboard(),
         stable_ids_dashboard(),
+        panel_features_dashboard(),
     ] {
         let default = dashboard.to_json_pretty().unwrap();
         for &target in GrafanaTarget::ALL {
@@ -176,7 +177,7 @@ fn route_performance_dashboard() -> Dashboard {
                 unit: percent_unit;
                 width: 6;
 
-                thresholds {
+                thresholds(green) {
                     green: 0.0;
                     yellow: 0.01;
                     red: 0.05;
@@ -215,7 +216,7 @@ fn route_performance_dashboard() -> Dashboard {
             bar_gauge "Top routes by traffic" {
                 query: promql!("topk(10, sum by (route) (rate(http_requests_total[$__rate_interval])))") {
                     legend_format: "{{route}}";
-                    instant: true;
+                    query_type: instant;
                 }
                 unit: reqps;
                 width: 12;
@@ -244,7 +245,7 @@ fn route_performance_dashboard() -> Dashboard {
                     Column::new("error %", promql!("sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval])) / sum by (route) (rate(http_requests_total[$__rate_interval]))"))
                         .unit(Unit::PercentUnit)
                         .cell(TableCellType::ColoredBackground)
-                        .thresholds(Thresholds::new().green(0.0).yellow(0.01).red(0.05)),
+                        .thresholds(Thresholds::absolute(Color::Green).step(0.0, Color::Green).step(0.01, Color::Yellow).step(0.05, Color::Red)),
                 )
                 .column(
                     Column::new("p50", promql!("histogram_quantile(0.50, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
@@ -254,7 +255,7 @@ fn route_performance_dashboard() -> Dashboard {
                     Column::new("p95", promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
                         .unit(Unit::Seconds)
                         .cell(TableCellType::ColoredBackground)
-                        .thresholds(Thresholds::new().green(0.0).yellow(0.3).red(1.0)),
+                        .thresholds(Thresholds::absolute(Color::Green).step(0.0, Color::Green).step(0.3, Color::Yellow).step(1.0, Color::Red)),
                 )
                 .column(
                     Column::new("p99", promql!("histogram_quantile(0.99, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
@@ -299,7 +300,7 @@ fn route_performance_dashboard() -> Dashboard {
                 unit: percent;
                 width: 12;
 
-                thresholds {
+                thresholds(red) {
                     red: 0.0;
                     yellow: 20.0;
                     green: 50.0;
@@ -353,6 +354,95 @@ fn stable_ids_dashboard() -> Dashboard {
 #[test]
 fn stable_ids_match_the_committed_golden_file() {
     assert_golden_for_every_target(&stable_ids_dashboard(), "stable_ids.json");
+}
+
+/// Repeats, panel query options and time overrides, every value mapping kind, panel and field data links, and annotations. `make verify-grafana` round-trips this golden too, which is what proves Grafana keeps each of these keys.
+fn panel_features_dashboard() -> Dashboard {
+    dashboard! {
+        title: "Panel features";
+        uid: "panel-features";
+        datasource: prometheus("prometheus-main");
+        built_in_annotation: BuiltInAnnotation::new().enable(false);
+
+        variable "job" {
+            values: ["api", "checkout"];
+            default: "api";
+        }
+
+        variable "instance" {
+            query: promql!("label_values(up{job=\"$job\"}, instance)");
+            multi: true;
+            include_all: true;
+        }
+
+        annotation "Restarts" => "changes(process_start_time_seconds{job=\"$job\"}[2m]) > 0" {
+            step: "60s";
+            title_format: "Restart";
+            text_format: "{{instance}} restarted";
+            tag_keys: ["job", "instance"];
+            icon_color: orange;
+        }
+
+        annotation "Scrape failures" => "up{job=\"$job\"} == 0" {
+            enable: false;
+            hide: true;
+            use_value_for_time: false;
+        }
+
+        row "Overview" {
+            stat "Availability" {
+                query: promql!("avg(up{job=\"$job\"})");
+                width: 8;
+                time_from: "24h";
+                hide_time_override: true;
+                mapping "1" => "Up" { color: green; }
+                mapping range(0.0, 0.99) => "Degraded" { color: yellow; }
+                mapping special(null) => "No data";
+                link "Runbook" => "https://runbook.example/api" { target_blank: true; }
+            }
+
+            timeseries "Requests, last week" {
+                query: promql!("sum(rate(http_requests_total{job=\"$job\"}[$__rate_interval]))");
+                width: 16;
+                min_interval: "1m";
+                max_data_points: 500;
+                time_shift: "7d";
+            }
+        }
+
+        row "Per instance" {
+            repeat: "job";
+
+            timeseries "Requests on $instance" {
+                query: promql!("sum(rate(http_requests_total{instance=\"$instance\"}[$__rate_interval]))");
+                repeat: horizontal("instance", 3);
+                data_link "Instance logs" => "/explore?instance=${__field.labels.instance}" {
+                    keep_time: true;
+                }
+            }
+
+            table "Status on $instance" {
+                query: promql!("up{instance=\"$instance\"}") {
+                    format: table;
+                    query_type: instant;
+                }
+                repeat: vertical("instance");
+                mapping regex("^(.*):\\d+$") => "$1";
+                mapping special(empty) => "-";
+
+                override field("Value") {
+                    data_link "Targets" => "/targets?instance=${__data.fields.instance}" {
+                        target_blank: true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_features_match_the_committed_golden_file() {
+    assert_golden_for_every_target(&panel_features_dashboard(), "panel_features.json");
 }
 
 // ---------------------------------------------------------------------------
@@ -739,7 +829,7 @@ let name = "Value #A";
         ),
         (
             "a value mapping",
-            r###"Stat::new("S").mapping(ValueMapping::new("0", "Down"))"###,
+            r###"Stat::new("S").mapping(ValueMapping::value("0").text("Down"))"###,
         ),
     ] {
         assert!(

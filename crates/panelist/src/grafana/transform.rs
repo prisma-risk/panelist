@@ -160,6 +160,11 @@ pub(crate) fn normalize_transformation(transformation: &Transformation) -> Value
             }
             ("labelsToFields", Value::Object(options))
         }
+        // `RenameByRegexTransformerOptions` in `renameByRegex.ts`: both keys are required strings, and Grafana's defaults (`(.*)` and `$1`) apply only in the editor, not to a stored transformation.
+        Transformation::RenameByRegex(rename) => (
+            "renameByRegex",
+            json!({"regex": rename.regex, "renamePattern": rename.rename_pattern}),
+        ),
         Transformation::Raw(raw) => (
             raw.id.as_str(),
             Value::Object(raw.options.clone().into_iter().collect()),

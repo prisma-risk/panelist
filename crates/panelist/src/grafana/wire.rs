@@ -28,6 +28,8 @@ use serde_json::Value;
 
 use crate::{DashboardLink, DataSource, GridPos};
 
+use super::link::GrafanaDataLink;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NormalizedDashboard {
@@ -124,7 +126,23 @@ pub(crate) struct GrafanaPanel {
     #[serde(default, skip_serializing_if = "is_false")]
     pub(crate) transparent: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) links: Vec<GrafanaLink>,
+    pub(crate) links: Vec<GrafanaDataLink>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) interval: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) max_data_points: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) time_from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) time_shift: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) hide_time_override: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) repeat: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) repeat_direction: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) max_per_row: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) collapsed: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -162,7 +180,8 @@ pub(crate) struct GrafanaTarget {
     pub(crate) ref_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) datasource: Option<DataSource>,
-    pub(crate) expr: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) expr: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) format: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]

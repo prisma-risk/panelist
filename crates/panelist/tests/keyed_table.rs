@@ -39,7 +39,7 @@ fn instant_table(expression: &str, ref_id: &str) -> PrometheusQuery {
     PrometheusQuery::new(expression)
         .ref_id(ref_id)
         .format(PrometheusFormat::Table)
-        .instant(true)
+        .instant()
 }
 
 fn dashboard_with(panel: impl Into<Panel>) -> Dashboard {
@@ -90,7 +90,11 @@ fn keyed_table_lowers_to_the_hand_written_table() {
             Column::new("p95", promql!(P95))
                 .unit(Unit::Seconds)
                 .cell(TableCellType::ColoredBackground)
-                .thresholds(Thresholds::new().green(0.0).red(1.0)),
+                .thresholds(
+                    Thresholds::absolute(Color::Green)
+                        .step(0.0, Color::Green)
+                        .step(1.0, Color::Red),
+                ),
         )
         .column(
             Column::trend("Trend", promql!(P95), Reducer::Last)
@@ -123,7 +127,11 @@ fn keyed_table_lowers_to_the_hand_written_table() {
             FieldOverride::by_name("p95")
                 .unit(Unit::Seconds)
                 .cell(TableCellType::ColoredBackground)
-                .thresholds(Thresholds::new().green(0.0).red(1.0)),
+                .thresholds(
+                    Thresholds::absolute(Color::Green)
+                        .step(0.0, Color::Green)
+                        .step(1.0, Color::Red),
+                ),
         )
         .override_field(FieldOverride::by_name("Trend").cell(SparklineCell::new().hide_value(true)))
         .build();
@@ -305,10 +313,13 @@ fn column_kinds_set_the_query_type_and_keep_other_options() {
     let panel = panel_json(
         Table::new("Routes")
             .keyed("route")
-            .column(Column::new("RPS", promql!(RPS).interval("1m").range(true)))
+            .column(Column::new(
+                "RPS",
+                promql!(RPS).interval("1m").query_type(QueryType::Range),
+            ))
             .column(Column::trend(
                 "Trend",
-                promql!(P95).instant(true).datasource(prometheus("other")),
+                promql!(P95).instant().datasource(prometheus("other")),
                 Reducer::Last,
             )),
     );
@@ -462,7 +473,11 @@ fn keyed_table_dashboard() -> Dashboard {
                         .column(
                             Column::new("5xx", promql!(ERRORS))
                                 .unit(Unit::RequestsPerSecond)
-                                .thresholds(Thresholds::new().green(0.0).red(0.5)),
+                                .thresholds(
+                                    Thresholds::absolute(Color::Green)
+                                        .step(0.0, Color::Green)
+                                        .step(0.5, Color::Red),
+                                ),
                         ),
                 ),
         )

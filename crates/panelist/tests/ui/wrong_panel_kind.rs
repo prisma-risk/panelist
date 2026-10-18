@@ -33,6 +33,7 @@ fn main() {
         }
         table "Routes" {
             graph_mode: none;
+            column "RPS" => promql!("sum by (route) (rate(requests_total[5m]))");
         }
     };
 }

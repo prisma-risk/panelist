@@ -73,15 +73,18 @@ builders while replacing only layout normalization and the wire model.
 
 ## Current import proof
 
-On 2026-10-17, every committed golden dashboard was rendered for each target and round-tripped through that target's release: the goldens in [`tests/golden/v11_5`](../crates/panelist/tests/golden/v11_5) through `grafana/grafana-oss:11.5.2`, and the goldens in [`tests/golden`](../crates/panelist/tests/golden) through `grafana/grafana-oss:13.0.2`. The script checks that each container reports exactly the expected version before posting anything. All six round trips came back with zero dropped, altered, retyped, or blocked properties:
+On 2026-10-17, every committed golden dashboard was rendered for each target and round-tripped through that target's release: the goldens in [`tests/golden/v11_5`](../crates/panelist/tests/golden/v11_5) through `grafana/grafana-oss:11.5.2`, and the goldens in [`tests/golden`](../crates/panelist/tests/golden) through `grafana/grafana-oss:13.0.2`. The script checks that each container reports exactly the expected version before posting anything. All eight round trips came back with zero dropped, altered, retyped, or blocked properties:
 
 | Golden | Leaves | Empty containers | 11.5.2 | 13.0.2 |
 | --- | --- | --- | --- | --- |
 | `basic.json` | 97 | 6 | pass | pass |
 | `route_performance.json` | 483 | 18 | pass | pass |
 | `stable_ids.json` | 109 | 12 | pass | pass |
+| `panel_features.json` | 224 | 9 | pass | pass |
 
 `stable_ids.json` uses `PanelIds::Stable`, so this also proves both releases store panel IDs from the stable range (up to nine digits, on rows, keyed and unkeyed panels, and panels nested in a collapsed row) unchanged. Grafana's dashboard schema types a panel `id` as `uint32` in both releases.
+
+`panel_features.json`, added and round-tripped through both releases on 2026-10-18, covers panel query options and time overrides (`interval`, `maxDataPoints`, `timeFrom`, `timeShift`, `hideTimeOverride`), horizontal and vertical panel repeats (`repeat`, `repeatDirection`, `maxPerRow`) and a row repeat, `value`, `range`, `regex`, and `special` value mappings with their `index`, panel header links and field data links in defaults and in an override, and an annotation list holding a configured built-in entry and two Prometheus annotation queries in the migrated `target` shape.
 
 The proof is about storage through the HTTP API, which is what provisioning and import rely on. A probe the same day posted the previous goldens, at `schemaVersion` 41, to Grafana 11.5.2, whose current version is 40, and got 41 back, so the legacy API does not migrate on save; the migrations described above run in the browser when a dashboard is opened.
 

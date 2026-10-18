@@ -281,8 +281,7 @@ fn table_cell_and_sort_dsl_matches_the_builder_model() {
             override field("Error rate") {
                 unit: percent;
                 cell: colored_background;
-                thresholds {
-                    green: 0.0;
+                thresholds(green) {
                     yellow: 1.0;
                     red: 5.0;
                 }
@@ -306,7 +305,11 @@ fn table_cell_and_sort_dsl_matches_the_builder_model() {
                 FieldOverride::by_name("Error rate")
                     .unit(Unit::Percent)
                     .cell_type(TableCellType::ColoredBackground)
-                    .thresholds(Thresholds::new().green(0.0).yellow(1.0).red(5.0)),
+                    .thresholds(
+                        Thresholds::absolute(Color::Green)
+                            .step(1.0, Color::Yellow)
+                            .step(5.0, Color::Red),
+                    ),
             )
             .override_field(
                 FieldOverride::by_name("Trend")
@@ -852,13 +855,13 @@ fn panel_option_parity_dsl_matches_the_builder_model() {
             mapping "0" => "Down";
             mapping "1" => "Up" { color: green; }
             link "Runbook" => "https://runbook";
-            link "Dashboard" => "https://dash" { target_blank: true; tags: ["ops"]; }
+            link "Dashboard" => "https://dash" { target_blank: true; keep_time: true; }
             reduce { values: true; calculations: [mean, max]; fields: "/.*/"; }
         }
 
         gauge "Saturation" {
             query: promql!("saturation");
-            color: continuous("BlYlRd");
+            color: continuous(ContinuousPalette::BlueYellowRed);
             reduce { values: false; }
         }
 
@@ -892,13 +895,13 @@ fn panel_option_parity_dsl_matches_the_builder_model() {
                 .color_mode(StatColorMode::Background)
                 .wide_layout(true)
                 .color(ColorScheme::Fixed(Color::Red))
-                .mapping(ValueMapping::new("0", "Down"))
-                .mapping(ValueMapping::new("1", "Up").color(Color::Green))
-                .link(DashboardLink::new("Runbook", "https://runbook"))
+                .mapping(ValueMapping::value("0").text("Down"))
+                .mapping(ValueMapping::value("1").text("Up").color(Color::Green))
+                .link(DataLink::new("Runbook", "https://runbook"))
                 .link(
-                    DashboardLink::new("Dashboard", "https://dash")
+                    DataLink::new("Dashboard", "https://dash")
                         .target_blank(true)
-                        .tags(["ops"]),
+                        .keep_time(true),
                 )
                 .reduce_options(
                     ReduceOptions::new()
@@ -910,7 +913,7 @@ fn panel_option_parity_dsl_matches_the_builder_model() {
         .panel(
             Gauge::new("Saturation")
                 .query(PrometheusQuery::new("saturation"))
-                .color(ColorScheme::Continuous("BlYlRd".to_owned()))
+                .color(ColorScheme::Continuous(ContinuousPalette::BlueYellowRed))
                 .reduce_options(ReduceOptions::new().values(false)),
         )
         .panel(
@@ -952,7 +955,7 @@ fn panel_option_parity_emits_the_grafana_wire_values() {
             wide_layout: true;
             color: fixed(red);
             mapping "1" => "Up" { color: green; }
-            link "Runbook" => "https://runbook" { target_blank: true; tags: ["ops"]; }
+            link "Runbook" => "https://runbook" { target_blank: true; include_vars: true; }
             reduce { values: true; calculations: [mean, max]; fields: "/.*/"; }
         }
     };
@@ -989,14 +992,13 @@ fn panel_option_parity_emits_the_grafana_wire_values() {
     );
     assert_eq!(
         stat["fieldConfig"]["defaults"]["mappings"],
-        json!([{"options": {"1": {"color": "green", "text": "Up"}}, "type": "value"}])
+        json!([{"options": {"1": {"color": "green", "index": 0, "text": "Up"}}, "type": "value"}])
     );
     assert_eq!(
         stat["links"],
         json!([{
-            "includeVars": false, "keepTime": false, "tags": ["ops"],
-            "targetBlank": true, "title": "Runbook", "type": "link",
-            "url": "https://runbook"
+            "targetBlank": true, "title": "Runbook",
+            "url": "https://runbook?$__all_variables"
         }])
     );
 }
@@ -1244,6 +1246,282 @@ fn variable_selector_mistakes_are_reported_not_guessed() {
     }
 }
 
+/// Every DSL arm for repeats, query options, time overrides, value mappings, data links, and annotations, against the builder calls it stands for. Non-default values throughout, so an arm that does nothing cannot pass by matching a default.
+#[test]
+fn panel_feature_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Features";
+        datasource: prometheus("prometheus-main");
+        built_in_annotation: BuiltInAnnotation::new().enable(false);
+
+        variable "instance" {
+            values: ["a", "b"];
+        }
+
+        annotation "Restarts" => "changes(process_start_time_seconds[2m]) > 0" {
+            datasource: prometheus("prometheus-other");
+            enable: false;
+            hide: true;
+            icon_color: orange;
+            step: "60s";
+            title_format: "Restart";
+            text_format: "{{instance}}";
+            tag_keys: ["job", "instance"];
+            use_value_for_time: true;
+        }
+        annotation "Custom color" => "up == 0" { icon_color: "#ff00ff"; }
+        annotation "Bare" => "up == 0";
+        annotation: RawAnnotation::new("Deploys").datasource(loki("loki-main"));
+
+        row "Per instance" {
+            repeat: "instance";
+
+            timeseries "Rate" {
+                query: promql!("up");
+                min_interval: "1m";
+                max_data_points: 500;
+                time_from: "24h";
+                time_shift: "1d";
+                hide_time_override: true;
+                repeat: horizontal("instance", 3);
+                link "Runbook" => "https://runbook.example" { target_blank: true; include_vars: true; keep_time: true; }
+                link "Plain" => "https://plain.example";
+                data_link "Logs" => "/explore?instance=${__field.labels.instance}" { keep_time: true; }
+                data_link "Bare" => "/bare";
+            }
+        }
+
+        stat "Status" {
+            query: promql!("up");
+            repeat: vertical("instance");
+            mapping "1" => "Up" { color: green; }
+            mapping range(0.0, 0.5) => "Low" { color: red; }
+            mapping range(0.5, None) => "High";
+            mapping regex("^prod-(.*)$") => "$1" { color: blue; }
+            mapping regex("^dev-.*$") => "Dev";
+            mapping special(null) => "Null" { color: yellow; }
+            mapping special(nan) => "NaN";
+            mapping special(null_or_nan) => "Gap";
+            mapping special(true) => "Yes";
+            mapping special(false) => "No";
+            mapping special(empty) => "Empty";
+
+            override field("status") {
+                data_link "Status" => "/status" { target_blank: true; }
+                data_link "Plain" => "/plain";
+            }
+        }
+
+        gauge "Saturation" {
+            query: promql!("up");
+            repeat: horizontal("instance");
+        }
+
+        bar_gauge "Routes" {
+            query: promql!("up");
+            repeat: String::from("instance");
+        }
+    };
+
+    let from_builder = Dashboard::new("Features")
+        .datasource(prometheus("prometheus-main"))
+        .built_in_annotation(BuiltInAnnotation::new().enable(false))
+        .variable(CustomVariable::new("instance", ["a", "b"]))
+        .annotation(
+            PrometheusAnnotation::new("Restarts", "changes(process_start_time_seconds[2m]) > 0")
+                .datasource(prometheus("prometheus-other"))
+                .enable(false)
+                .hide(true)
+                .icon_color(Color::Orange)
+                .step("60s")
+                .title_format("Restart")
+                .text_format("{{instance}}")
+                .tag_keys(["job", "instance"])
+                .use_value_for_time(true),
+        )
+        .annotation(
+            PrometheusAnnotation::new("Custom color", "up == 0")
+                .icon_color(Color::custom("#ff00ff")),
+        )
+        .annotation(PrometheusAnnotation::new("Bare", "up == 0"))
+        .annotation(RawAnnotation::new("Deploys").datasource(loki("loki-main")))
+        .row(
+            Row::new("Per instance").repeat("instance").panel(
+                Timeseries::new("Rate")
+                    .query(PrometheusQuery::new("up"))
+                    .min_interval("1m")
+                    .max_data_points(500)
+                    .time_from("24h")
+                    .time_shift("1d")
+                    .hide_time_override(true)
+                    .repeat(Repeat::horizontal("instance").max_per_row(3))
+                    .link(
+                        DataLink::new("Runbook", "https://runbook.example")
+                            .target_blank(true)
+                            .include_vars(true)
+                            .keep_time(true),
+                    )
+                    .link(DataLink::new("Plain", "https://plain.example"))
+                    .data_link(
+                        DataLink::new("Logs", "/explore?instance=${__field.labels.instance}")
+                            .keep_time(true),
+                    )
+                    .data_link(DataLink::new("Bare", "/bare")),
+            ),
+        )
+        .panel(
+            Stat::new("Status")
+                .query(PrometheusQuery::new("up"))
+                .repeat(Repeat::vertical("instance"))
+                .mapping(ValueMapping::value("1").text("Up").color(Color::Green))
+                .mapping(ValueMapping::range(0.0, 0.5).text("Low").color(Color::Red))
+                .mapping(ValueMapping::range(0.5, None).text("High"))
+                .mapping(
+                    ValueMapping::regex("^prod-(.*)$")
+                        .text("$1")
+                        .color(Color::Blue),
+                )
+                .mapping(ValueMapping::regex("^dev-.*$").text("Dev"))
+                .mapping(
+                    ValueMapping::special(SpecialValue::Null)
+                        .text("Null")
+                        .color(Color::Yellow),
+                )
+                .mapping(ValueMapping::special(SpecialValue::NaN).text("NaN"))
+                .mapping(ValueMapping::special(SpecialValue::NullOrNaN).text("Gap"))
+                .mapping(ValueMapping::special(SpecialValue::True).text("Yes"))
+                .mapping(ValueMapping::special(SpecialValue::False).text("No"))
+                .mapping(ValueMapping::special(SpecialValue::Empty).text("Empty"))
+                .override_field(
+                    FieldOverride::by_name("status")
+                        .data_link(DataLink::new("Status", "/status").target_blank(true))
+                        .data_link(DataLink::new("Plain", "/plain")),
+                ),
+        )
+        .panel(
+            Gauge::new("Saturation")
+                .query(PrometheusQuery::new("up"))
+                .repeat(Repeat::horizontal("instance")),
+        )
+        .panel(
+            BarGauge::new("Routes")
+                .query(PrometheusQuery::new("up"))
+                .repeat("instance"),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
+fn vocabulary_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Vocabulary";
+
+        stat "Revenue" {
+            query: promql!("sum(revenue_total)") { query_type: instant; }
+            unit: currency(Currency::Eur);
+            color: by_name;
+            thresholds(red) {
+                yellow: 100.0;
+                green: 1000.0;
+            }
+        }
+
+        timeseries "Uptime" {
+            query: promql!("time() - process_start_time_seconds") { query_type: both; }
+            query: promql!("up") { query_type: range; }
+            unit: duration_seconds;
+            color: shades(blue);
+        }
+
+        table "Hosts" {
+            query: promql!("node_network_receive_bytes_total") { ref_id: "A"; }
+            override query("A") {
+                unit: bits_per_second;
+                thresholds(green) {
+                    orange: 1e9;
+                    purple: 1e10;
+                }
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Vocabulary")
+        .panel(
+            Stat::new("Revenue")
+                .query(PrometheusQuery::new("sum(revenue_total)").query_type(QueryType::Instant))
+                .unit(Unit::Currency(Currency::Eur))
+                .color(ColorScheme::ClassicPaletteByName)
+                .thresholds(
+                    Thresholds::absolute(Color::Red)
+                        .step(100.0, Color::Yellow)
+                        .step(1000.0, Color::Green),
+                ),
+        )
+        .panel(
+            Timeseries::new("Uptime")
+                .query(
+                    PrometheusQuery::new("time() - process_start_time_seconds")
+                        .query_type(QueryType::Both),
+                )
+                .query(PrometheusQuery::new("up").query_type(QueryType::Range))
+                .unit(Unit::DurationSeconds)
+                .color(ColorScheme::Shades(Color::Blue)),
+        )
+        .panel(
+            Table::new("Hosts")
+                .query(PrometheusQuery::new("node_network_receive_bytes_total").ref_id("A"))
+                .override_field(
+                    FieldOverride::by_query("A")
+                        .unit(Unit::BitsPerSecond)
+                        .thresholds(
+                            Thresholds::absolute(Color::Green)
+                                .step(1e9, Color::Orange)
+                                .step(1e10, Color::Purple),
+                        ),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+#[test]
+fn every_unit_keyword_maps_to_its_typed_unit() {
+    macro_rules! unit_of {
+        ($unit:ident) => {
+            dashboard! { title: "Units"; stat "S" { unit: $unit; } }
+        };
+    }
+    for (from_macro, unit) in [
+        (unit_of!(nanoseconds), Unit::Nanoseconds),
+        (unit_of!(microseconds), Unit::Microseconds),
+        (unit_of!(minutes), Unit::Minutes),
+        (unit_of!(hours), Unit::Hours),
+        (unit_of!(days), Unit::Days),
+        (unit_of!(duration_seconds), Unit::DurationSeconds),
+        (unit_of!(duration_milliseconds), Unit::DurationMilliseconds),
+        (unit_of!(bits_per_second), Unit::BitsPerSecond),
+        (unit_of!(packets_per_second), Unit::PacketsPerSecond),
+        (unit_of!(reads_per_second), Unit::ReadsPerSecond),
+        (unit_of!(writes_per_second), Unit::WritesPerSecond),
+        (unit_of!(iops), Unit::IoOperationsPerSecond),
+        (unit_of!(events_per_second), Unit::EventsPerSecond),
+    ] {
+        assert_eq!(
+            from_macro,
+            Dashboard::new("Units").panel(Stat::new("S").unit(unit))
+        );
+    }
+}
+
 /// Titles, names, link targets, mapping values, and organize arguments are
 /// ordinary expressions, so dashboards can be generated from data.
 #[test]
@@ -1294,9 +1572,9 @@ fn expressions_are_accepted_wherever_a_literal_used_to_be_required() {
                 .panel(
                     Stat::new("checkout errors")
                         .query(PrometheusQuery::new("sum(rate(checkout_errors_total[5m]))"))
-                        .mapping(ValueMapping::new("0", "checkout healthy"))
+                        .mapping(ValueMapping::value("0").text("checkout healthy"))
                         .link(
-                            DashboardLink::new("CHECKOUT", "https://runbooks.example.com/checkout")
+                            DataLink::new("CHECKOUT", "https://runbooks.example.com/checkout")
                                 .target_blank(true),
                         ),
                 )
@@ -1397,8 +1675,7 @@ fn panels_and_rows_continue_from_a_base_builder() {
     assert_eq!(from_macro, from_builder);
 }
 
-/// The general thresholds grammar: a mandatory base color, then ascending
-/// `<value> => <color>` steps with any `Color`, including custom names.
+/// A thresholds block names its base color in parentheses or with `base:`, then lists steps as `<value> => <color>` with any `Color`, including custom names, or as `<color word>: <value>`.
 #[test]
 fn thresholds_with_a_base_and_arbitrary_colors_match_the_builder_model() {
     let warn = 70.5;
@@ -1423,6 +1700,13 @@ fn thresholds_with_a_base_and_arbitrary_colors_match_the_builder_model() {
             }
         }
 
+        bar_gauge "Mixed steps" {
+            thresholds(red) {
+                yellow: 50.0;
+                95 => "dark-green";
+            }
+        }
+
         table "Cells" {
             override field("Errors") {
                 thresholds { base: "transparent"; 5 => red; }
@@ -1433,31 +1717,28 @@ fn thresholds_with_a_base_and_arbitrary_colors_match_the_builder_model() {
     let from_builder = Dashboard::new("Thresholds")
         .panel(
             Gauge::new("Saturation").thresholds(
-                Thresholds::new()
-                    .step(Color::Blue, None)
-                    .step(Color::Green, 1.0)
-                    .step(Color::Orange, 70.5)
-                    .step(Color::custom("dark-red"), 90.0)
-                    .step(Color::custom("#ff00ff"), 99.0),
+                Thresholds::absolute(Color::Blue)
+                    .step(1.0, Color::Green)
+                    .step(70.5, Color::Orange)
+                    .step(90.0, Color::custom("dark-red"))
+                    .step(99.0, Color::custom("#ff00ff")),
             ),
         )
+        .panel(Stat::new("Ratio").thresholds(
+            Thresholds::new(ThresholdMode::Percentage, Color::Green).step(80.0, Color::Purple),
+        ))
         .panel(
-            Stat::new("Ratio").thresholds(
-                Thresholds::new()
-                    .mode(ThresholdMode::Percentage)
-                    .step(Color::Green, None)
-                    .step(Color::Purple, 80.0),
+            BarGauge::new("Mixed steps").thresholds(
+                Thresholds::absolute(Color::Red)
+                    .step(50.0, Color::Yellow)
+                    .step(95.0, Color::custom("dark-green")),
             ),
         )
-        .panel(
-            Table::new("Cells").override_field(
-                FieldOverride::by_name("Errors").thresholds(
-                    Thresholds::new()
-                        .step(Color::custom("transparent"), None)
-                        .step(Color::Red, 5.0),
-                ),
+        .panel(Table::new("Cells").override_field(
+            FieldOverride::by_name("Errors").thresholds(
+                Thresholds::absolute(Color::custom("transparent")).step(5.0, Color::Red),
             ),
-        );
+        ));
 
     assert_eq!(from_macro, from_builder);
     from_macro.validate().unwrap();
@@ -1502,7 +1783,11 @@ fn word_valued_keys_accept_expressions() {
                 .orientation(Orientation::Vertical)
                 .color(ColorScheme::Fixed(Color::Blue))
                 .reduce_options(ReduceOptions::new().calculations([Reducer::Last]))
-                .mapping(ValueMapping::new("1", "Up").color(Color::custom("dark-green"))),
+                .mapping(
+                    ValueMapping::value("1")
+                        .text("Up")
+                        .color(Color::custom("dark-green")),
+                ),
         )
         .panel(
             Timeseries::new("Series")
@@ -1671,24 +1956,29 @@ fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
         ($($kind:ident)*) => {
             dashboard! {
                 title: "Common";
+                variable "instance" { values: ["a", "b"]; }
                 $(
                     $kind "Common" {
                         query: promql!("up") {
                             legend_format: "{{instance}}";
                             ref_id: "A";
-                            instant: true;
-                            range: false;
+                            query_type: instant;
                             datasource: prometheus("main");
                             hidden: false;
                             interval: "1m";
                             editor_mode: code;
                             format: table;
+                            unit: currency(eur);
+                            color: blue;
+                            display_name: "q";
+                            decimals: 1;
+                            thresholds(green) { 1 => red; }
+                            field_property: OverrideProperty::Min(0.0);
                         }
                         query: loki!("{job=\"x\"}") {
                             legend_format: "l";
                             ref_id: "B";
-                            instant: false;
-                            range: true;
+                            query_type: range;
                             datasource: loki("logs");
                             hidden: true;
                             interval: "5m";
@@ -1709,16 +1999,21 @@ fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
                         decimals: 2;
                         display_name: "n";
                         transparent: true;
-                        color: continuous("Blues");
+                        color: continuous(blues);
                         thresholds { base: green; 1 => red; }
                         mapping "0" => "zero" { color: red; }
                         link "Docs" => "https://docs.example.com" {
-                            tooltip: "t";
                             target_blank: true;
                             include_vars: true;
                             keep_time: true;
-                            tags: ["a"];
                         }
+                        data_link "Value" => "https://docs.example.com/${__value.raw}";
+                        repeat: vertical("instance");
+                        min_interval: "30s";
+                        max_data_points: 500;
+                        time_from: "1h";
+                        time_shift: "1d";
+                        hide_time_override: true;
                         override field("a") {
                             color: "dark-red";
                             line_width: 2;
@@ -1728,7 +2023,9 @@ fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
                             max: 1.0;
                             decimals: 1;
                             display_name: "A";
-                            thresholds { green: 0.0; }
+                            thresholds(green) { red: 1.0; }
+                            mapping regex("^a") => "A";
+                            data_link "Field" => "https://docs.example.com/field" { keep_time: true; }
                         }
                         override regex("^b") { cell: gauge { mode: basic; value_display: color; }; }
                         override query("A") { cell: sparkline { hide_value: true; line_width: 1.0; fill_opacity: 5.0; }; }
@@ -1741,6 +2038,7 @@ fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
                         transform organize { rename "a" => "b"; hide "c"; order ["b"]; }
                         transform time_series_to_table { query "A"; query "B": mean; time_field "A": "Time"; }
                         transform labels_to_fields { mode: rows; keep ["x"]; value_label: "v"; }
+                        transform rename_by_regex("(.*)-api", "$1");
                         transform: RawTransformation::new("merge");
                         option "o": 1;
                         extra "e": 2;
@@ -1755,10 +2053,26 @@ fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
         title: "Kind specific";
         target: v11_5;
         panel_ids: stable;
+        built_in_annotation: BuiltInAnnotation::new().hide(true);
+        annotation "Deploys" => "changes(build_info[5m]) > 0" {
+            datasource: prometheus("main");
+            enable: true;
+            hide: false;
+            icon_color: "dark-blue";
+            step: "1m";
+            title_format: "Deploy";
+            text_format: "{{version}}";
+            tag_keys: ["version"];
+            use_value_for_time: false;
+        }
+        annotation: RawAnnotation::new("Other");
+
+        variable "instance" { values: ["a", "b"]; }
 
         row "Row" {
             key: "row";
             collapsed: false;
+            repeat: "instance";
         }
 
         text "Text" {
@@ -1795,6 +2109,28 @@ fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
         table "Table" {
             sort_by: ("a", asc);
             cell: sparkline { hide_value: false; };
+            color: shades(purple);
+            mapping range(0.0, 1.0) => "low";
+            mapping special(null_or_nan) => "missing" { color: "gray"; }
+        }
+        keyed_table "Keyed" by "route" {
+            sort_by: ("RPS", desc);
+            color: by_name;
+            key_name: "Route";
+            column "RPS" => promql!("sum by (route) (rate(requests_total[5m]))") {
+                unit: reqps;
+                min: 0.0;
+                max: 1e6;
+                decimals: 1;
+                color: green;
+                thresholds(green) { 100 => red; }
+                cell: colored_background { mode: gradient; };
+                property: OverrideProperty::DisplayName("Requests".to_owned());
+            }
+            column "Errors" => PrometheusQuery::new("sum by (route) (rate(errors_total[5m]))");
+            trend last "Trend" => promql!("sum by (route) (rate(requests_total[5m]))") {
+                cell: sparkline { hide_value: true; };
+            }
         }
         heatmap "Heatmap" {
             color_mode: opacity;
@@ -1808,6 +2144,7 @@ fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
     };
 
     // Compiling is the main assertion; both must also validate.
+    common.validate().unwrap();
     let common: serde_json::Value = serde_json::from_str(&common.to_json().unwrap()).unwrap();
     assert_eq!(common["panels"].as_array().map(Vec::len), Some(7));
     specific.validate().unwrap();
@@ -1854,4 +2191,159 @@ fn a_block_with_three_hundred_panels_expands() {
 
     let json: serde_json::Value = serde_json::from_str(&dashboard.to_json().unwrap()).unwrap();
     assert_eq!(json["panels"].as_array().map(Vec::len), Some(300));
+}
+
+/// `keyed_table … by …` configures a table, then applies the keyed-only keys to the `KeyedTable` that `.keyed(..)` returns, whatever order they are written in.
+#[test]
+fn keyed_table_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Routes";
+        datasource: prometheus("prometheus-main");
+
+        row "Routes" {
+            keyed_table "Route performance" by "route" {
+                key_name: "Route";
+                column "RPS" => promql!("sum by (route) (rate(requests_total[5m]))") {
+                    unit: reqps;
+                }
+                width: 24;
+                column "p95" => promql!("histogram_quantile(0.95, sum by (route, le) (rate(duration_bucket[5m])))") {
+                    unit: seconds;
+                    cell: colored_background;
+                    thresholds(green) { yellow: 0.3; red: 1.0; }
+                }
+                trend last "Trend" => promql!("sum by (route) (rate(requests_total[5m]))") {
+                    cell: sparkline { hide_value: true; };
+                }
+                sort_by: ("p95", desc);
+            }
+            keyed_table from Table::new("Hosts").height(6) by "instance" {
+                column "Up" => PrometheusQuery::new("up");
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Routes")
+        .datasource(prometheus("prometheus-main"))
+        .row(
+            Row::new("Routes")
+                .panel(
+                    Table::new("Route performance")
+                        .width(24)
+                        .sort_by("p95", SortDirection::Descending)
+                        .keyed("route")
+                        .key_name("Route")
+                        .column(
+                            Column::new(
+                                "RPS",
+                                PrometheusQuery::new("sum by (route) (rate(requests_total[5m]))"),
+                            )
+                            .unit(Unit::RequestsPerSecond),
+                        )
+                        .column(
+                            Column::new(
+                                "p95",
+                                PrometheusQuery::new(
+                                    "histogram_quantile(0.95, sum by (route, le) (rate(duration_bucket[5m])))",
+                                ),
+                            )
+                            .unit(Unit::Seconds)
+                            .cell(TableCellType::ColoredBackground)
+                            .thresholds(
+                                Thresholds::absolute(Color::Green)
+                                    .step(0.3, Color::Yellow)
+                                    .step(1.0, Color::Red),
+                            ),
+                        )
+                        .column(
+                            Column::trend(
+                                "Trend",
+                                PrometheusQuery::new("sum by (route) (rate(requests_total[5m]))"),
+                                Reducer::Last,
+                            )
+                            .cell(SparklineCell::new().hide_value(true)),
+                        ),
+                )
+                .panel(
+                    Table::new("Hosts")
+                        .height(6)
+                        .keyed("instance")
+                        .column(Column::new("Up", PrometheusQuery::new("up"))),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// Per-query field configuration, palette and currency words, `rename_by_regex`, and the mapping and data link keys inside overrides.
+#[test]
+fn query_field_config_and_new_words_match_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Fields";
+
+        timeseries "Latency" {
+            query: promql!("histogram_quantile(0.99, sum by (le) (rate(duration_bucket[5m])))") {
+                ref_id: "A";
+                query_type: range;
+                unit: seconds;
+                color: orange;
+                display_name: "p99";
+                decimals: 2;
+                thresholds(green) { 1 => red; }
+            }
+            color: continuous(blue_yellow_red);
+        }
+
+        table "Prices" {
+            query: promql!("price") { ref_id: "B"; }
+            unit: currency(gbp);
+            transform rename_by_regex("(.*)_total", "$1");
+            override field("status") {
+                mapping "0" => "Down" { color: red; }
+                data_link "Runbook" => "https://runbooks.example.com/${__value.text}";
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Fields")
+        .panel(
+            Timeseries::new("Latency")
+                .query(
+                    PrometheusQuery::new(
+                        "histogram_quantile(0.99, sum by (le) (rate(duration_bucket[5m])))",
+                    )
+                    .ref_id("A")
+                    .query_type(QueryType::Range)
+                    .unit(Unit::Seconds)
+                    .color(Color::Orange)
+                    .display_name("p99")
+                    .decimals(2)
+                    .thresholds(Thresholds::absolute(Color::Green).step(1.0, Color::Red)),
+                )
+                .color(ColorScheme::Continuous(ContinuousPalette::BlueYellowRed)),
+        )
+        .panel(
+            Table::new("Prices")
+                .query(PrometheusQuery::new("price").ref_id("B"))
+                .unit(Unit::Currency(Currency::Gbp))
+                .transform(RenameByRegex::new("(.*)_total", "$1"))
+                .override_field(
+                    FieldOverride::by_name("status")
+                        .mapping(ValueMapping::value("0").text("Down").color(Color::Red))
+                        .data_link(DataLink::new(
+                            "Runbook",
+                            "https://runbooks.example.com/${__value.text}",
+                        )),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
 }

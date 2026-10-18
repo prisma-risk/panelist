@@ -29,14 +29,14 @@ fn main() {
         stat "No base" {
             thresholds { 50 => yellow; 90 => red; }
         }
-        stat "Mixed" {
-            thresholds { base: green; yellow: 50.0; 90 => red; }
-        }
-        stat "Late base" {
-            thresholds { 50 => yellow; base: green; }
+        stat "Two bases" {
+            thresholds(green) { base: blue; 90 => red; }
         }
         stat "Typo" {
             thresholds { bse: green; 50 => yelow; }
+        }
+        stat "Unknown color key" {
+            thresholds(green) { gray: 50.0; }
         }
     };
 }

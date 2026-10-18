@@ -41,6 +41,7 @@ pub(crate) struct Stop {
     fat_arrow: bool,
     brace: bool,
     from: bool,
+    by: bool,
 }
 
 impl Stop {
@@ -52,6 +53,7 @@ impl Stop {
         fat_arrow: false,
         brace: false,
         from: false,
+        by: false,
     };
 
     /// `;` or a `{ … }` group.
@@ -80,11 +82,24 @@ impl Stop {
         fat_arrow: false,
         brace: false,
         from: false,
+        by: false,
     };
 
     /// `;`, a `{ … }` group, or the identifier `from` outside a path.
     pub(crate) const TITLE: Self = Self {
         from: true,
+        ..Self::SEMI_OR_BRACE
+    };
+
+    /// [`Stop::TITLE`], or the identifier `by` outside a path.
+    pub(crate) const TITLE_OR_BY: Self = Self {
+        by: true,
+        ..Self::TITLE
+    };
+
+    /// `;`, a `{ … }` group, or the identifier `by` outside a path.
+    pub(crate) const BASE_OR_BY: Self = Self {
+        by: true,
         ..Self::SEMI_OR_BRACE
     };
 }
@@ -127,6 +142,23 @@ impl Expr {
                 if group.delimiter() == Delimiter::Parenthesis =>
             {
                 Some((name, Expr::from_stream(group.stream())))
+            }
+            _ => None,
+        }
+    }
+
+    /// The arguments when the run is exactly `name!( … )`.
+    pub(crate) fn as_call_of_macro(&self, name: &str) -> Option<TokenStream> {
+        match self.trees.as_slice() {
+            [
+                TokenTree::Ident(ident),
+                TokenTree::Punct(bang),
+                TokenTree::Group(group),
+            ] if ident == name
+                && bang.as_char() == '!'
+                && group.delimiter() == Delimiter::Parenthesis =>
+            {
+                Some(group.stream())
             }
             _ => None,
         }
@@ -384,7 +416,10 @@ impl Tokens {
                     '=' => stop.fat_arrow && self.is_fat_arrow(),
                     _ => false,
                 },
-                TokenTree::Ident(ident) => stop.from && ident == "from" && !self.after_path(),
+                TokenTree::Ident(ident) => {
+                    ((stop.from && ident == "from") || (stop.by && ident == "by"))
+                        && !self.after_path()
+                }
                 TokenTree::Literal(_) => false,
             };
             if ends {

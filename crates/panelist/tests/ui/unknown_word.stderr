@@ -20,7 +20,7 @@ error: unknown panel ID scheme `stabel`; did you mean `stable`?
    |                    ^^^^^^
 
 error: unknown unit `second`; did you mean `seconds`?
-       accepted: `seconds`, `milliseconds`, `bytes`, `bytes_per_second`, `percent`, `percent_unit`, `reqps`, `ops`, `short`, `none`, `custom(<unit>)`; or any expression of type `Unit`, such as `(second)` for a variable
+       accepted: `nanoseconds`, `microseconds`, `milliseconds`, `seconds`, `minutes`, `hours`, `days`, `duration_seconds`, `duration_milliseconds`, `bytes`, `bytes_per_second`, `bits_per_second`, `packets_per_second`, `percent`, `percent_unit`, `reqps`, `ops`, `reads_per_second`, `writes_per_second`, `iops`, `events_per_second`, `short`, `none`, `currency(<currency>)`, `custom(<unit>)`; or any expression of type `Unit`, such as `(second)` for a variable
   --> tests/ui/unknown_word.rs:33:19
    |
 33 |             unit: second;

@@ -23,7 +23,7 @@
 
 use std::collections::HashSet;
 
-use crate::{DataSource, PrometheusFormat, Query};
+use crate::{DataSource, FieldOverride, OverrideMatcher, PrometheusFormat, Query, QueryType};
 
 use super::layout::reference_id;
 use super::wire::GrafanaTarget;
@@ -52,6 +52,21 @@ pub(crate) fn effective_ref_ids(queries: &[Query]) -> Vec<String> {
         .collect()
 }
 
+/// The field overrides queries carry through their own field properties, in query order.
+///
+/// Each query with properties becomes one override matching its resolved reference ID, so this runs after reference IDs are assigned. A panel emits these before its own overrides: Grafana applies overrides in array order and a later one wins, so a panel-level override stays free to refine one series of a query.
+pub(crate) fn query_field_overrides(queries: &[Query]) -> Vec<FieldOverride> {
+    queries
+        .iter()
+        .zip(effective_ref_ids(queries))
+        .filter(|(query, _)| !query.options().field_properties.is_empty())
+        .map(|(query, ref_id)| FieldOverride {
+            matcher: OverrideMatcher::QueryRefId(ref_id),
+            properties: query.options().field_properties.clone(),
+        })
+        .collect()
+}
+
 pub(crate) fn normalize_targets(
     queries: &[Query],
     panel_datasource: Option<&DataSource>,
@@ -63,15 +78,27 @@ pub(crate) fn normalize_targets(
         .zip(ref_ids)
         .map(|(query, ref_id)| {
             let options = query.options();
+            // Wire states per evaluation, for Prometheus-style targets:
+            //   unset    no `instant`, no `range` (the datasource default)
+            //   Range    `range: true`
+            //   Instant  `instant: true, range: false`
+            //   Both     `instant: true, range: true`
+            let (instant, range) = match options.query_type {
+                None => (false, None),
+                Some(QueryType::Range) => (false, Some(true)),
+                Some(QueryType::Instant) => (true, Some(false)),
+                Some(QueryType::Both) => (true, Some(true)),
+            };
+            // Loki reads `queryType` and has no combined mode; validation rejects `Both` on a Loki query before it gets here.
             let query_type = match query {
-                Query::Loki(_) => Some(if options.instant { "instant" } else { "range" }),
+                Query::Loki(_) => Some(if instant { "instant" } else { "range" }),
                 Query::Prometheus(_) | Query::Raw(_) => None,
             };
 
             GrafanaTarget {
                 ref_id,
                 datasource: options.datasource.as_ref().or(panel_datasource).cloned(),
-                expr: query.expression().to_owned(),
+                expr: query.expression().map(ToOwned::to_owned),
                 format: query.prometheus_format().map(|format| match format {
                     PrometheusFormat::TimeSeries => "time_series",
                     PrometheusFormat::Table => "table",
@@ -79,8 +106,8 @@ pub(crate) fn normalize_targets(
                 }),
                 editor_mode: options.editor_mode.map(crate::QueryEditorMode::as_grafana),
                 legend_format: options.legend_format.clone(),
-                instant: options.instant,
-                range: options.range,
+                instant,
+                range,
                 hide: options.hidden,
                 interval: options.interval.clone(),
                 query_type,

@@ -71,6 +71,9 @@ const TABLE: Kinds = Kinds::bit(3);
 const TEXT: Kinds = Kinds::bit(4);
 const BAR_GAUGE: Kinds = Kinds::bit(5);
 const HEATMAP: Kinds = Kinds::bit(6);
+const KEYED_TABLE: Kinds = Kinds::bit(7);
+/// Tables and keyed tables, which start from the same table builder.
+const TABLES: Kinds = TABLE.or(KEYED_TABLE);
 
 /// Panel kinds, in the bit order of the constants above. A new panel builder
 /// is a new entry here plus a new bit.
@@ -103,7 +106,15 @@ pub(crate) static PANEL_KINDS: &[Kind] = &[
         keyword: "heatmap",
         ty: "Heatmap",
     },
+    Kind {
+        keyword: "keyed_table",
+        ty: "Table",
+    },
 ];
+
+/// The panel kind written `keyed_table <title> by <key> { … }`, whose
+/// table builder becomes a `KeyedTable` through `.keyed(key)`.
+pub(crate) const KEYED_TABLE_INDEX: usize = 7;
 
 const PROMQL: Kinds = Kinds::bit(0);
 
@@ -155,14 +166,27 @@ macro_rules! vocab {
 }
 
 vocab!(UNIT, "unit", "Unit", [
-    "seconds" => "Seconds",
+    "nanoseconds" => "Nanoseconds",
+    "microseconds" => "Microseconds",
     "milliseconds" => "Milliseconds",
+    "seconds" => "Seconds",
+    "minutes" => "Minutes",
+    "hours" => "Hours",
+    "days" => "Days",
+    "duration_seconds" => "DurationSeconds",
+    "duration_milliseconds" => "DurationMilliseconds",
     "bytes" => "Bytes",
     "bytes_per_second" => "BytesPerSecond",
+    "bits_per_second" => "BitsPerSecond",
+    "packets_per_second" => "PacketsPerSecond",
     "percent" => "Percent",
     "percent_unit" => "PercentUnit",
     "reqps" => "RequestsPerSecond",
     "ops" => "OperationsPerSecond",
+    "reads_per_second" => "ReadsPerSecond",
+    "writes_per_second" => "WritesPerSecond",
+    "iops" => "IoOperationsPerSecond",
+    "events_per_second" => "EventsPerSecond",
     "short" => "Short",
     "none" => "None",
 ]);
@@ -320,6 +344,69 @@ vocab!(LABELS_MODE, "labels mode", "LabelsToFieldsMode", [
 vocab!(COLOR_SCHEME, "color scheme", "ColorScheme", [
     "thresholds" => "Thresholds",
     "classic_palette" => "ClassicPalette",
+    "by_name" => "ClassicPaletteByName",
+]);
+vocab!(CONTINUOUS_PALETTE, "continuous palette", "ContinuousPalette", [
+    "green_yellow_red" => "GreenYellowRed",
+    "red_yellow_green" => "RedYellowGreen",
+    "blue_yellow_red" => "BlueYellowRed",
+    "yellow_red" => "YellowRed",
+    "blue_purple" => "BluePurple",
+    "yellow_blue" => "YellowBlue",
+    "blues" => "Blues",
+    "reds" => "Reds",
+    "greens" => "Greens",
+    "purples" => "Purples",
+    "viridis" => "Viridis",
+    "magma" => "Magma",
+    "plasma" => "Plasma",
+    "inferno" => "Inferno",
+    "cividis" => "Cividis",
+]);
+vocab!(CURRENCY, "currency", "Currency", [
+    "usd" => "Usd",
+    "gbp" => "Gbp",
+    "eur" => "Eur",
+    "jpy" => "Jpy",
+    "rub" => "Rub",
+    "uah" => "Uah",
+    "brl" => "Brl",
+    "dkk" => "Dkk",
+    "isk" => "Isk",
+    "nok" => "Nok",
+    "sek" => "Sek",
+    "czk" => "Czk",
+    "chf" => "Chf",
+    "pln" => "Pln",
+    "btc" => "Btc",
+    "milli_btc" => "MilliBtc",
+    "micro_btc" => "MicroBtc",
+    "zar" => "Zar",
+    "inr" => "Inr",
+    "krw" => "Krw",
+    "idr" => "Idr",
+    "php" => "Php",
+    "vnd" => "Vnd",
+    "try" => "Try",
+    "myr" => "Myr",
+    "xpf" => "Xpf",
+    "bgn" => "Bgn",
+    "pyg" => "Pyg",
+    "uyu" => "Uyu",
+    "ils" => "Ils",
+]);
+vocab!(QUERY_TYPE, "query type", "QueryType", [
+    "range" => "Range",
+    "instant" => "Instant",
+    "both" => "Both",
+]);
+vocab!(SPECIAL_VALUE, "special value", "SpecialValue", [
+    "null" => "Null",
+    "nan" => "NaN",
+    "null_or_nan" => "NullOrNaN",
+    "true" => "True",
+    "false" => "False",
+    "empty" => "Empty",
 ]);
 vocab!(THRESHOLD_MODE, "threshold mode", "ThresholdMode", [
     "absolute" => "Absolute",
@@ -377,6 +464,21 @@ pub(crate) enum Form {
         ty: &'static str,
         body: &'static Context,
     },
+    /// `key <value> => <text> [{ … }]`, or `range(<from>, <to>)`,
+    /// `regex(<pattern>)`, or `special(<value>)` before the `=>`, building a
+    /// `ValueMapping` passed to `.method(…)`.
+    Mapping(&'static str),
+    /// `key: <variable> | horizontal(<variable>[, <max per row>]) |
+    /// vertical(<variable>) | <expr>;` passed to `.method(…)`.
+    Repeat(&'static str),
+    /// `annotation <name> => <expr> [{ … }]` builds a Prometheus annotation.
+    Annotation,
+    /// `column <name> => <query> [{ … }]`, or with `trend` set,
+    /// `trend <reducer> <name> => <query> [{ … }]`: a keyed table column.
+    Column { trend: bool },
+    /// `key: <expr>;` calling `.method(<expr>)` on the keyed table that a
+    /// `keyed_table` panel becomes, after every table key.
+    Keyed(&'static str),
     /// `override <matcher> { … }`, see [`MATCHERS`].
     Override,
     /// `transform …`, see [`TRANSFORMS`].
@@ -474,6 +576,8 @@ pub(crate) static DASHBOARD: Context = Context {
             },
         ),
         key("variable", ALL, Form::Variable),
+        key("annotation", ALL, Form::Annotation),
+        expr("built_in_annotation", ALL),
         key("row", ALL, Form::Row),
         expr("panel", ALL),
         expr("panels", ALL),
@@ -490,6 +594,7 @@ pub(crate) static ROW: Context = Context {
     keys: &[
         expr("key", ALL),
         expr("collapsed", ALL),
+        expr("repeat", ALL),
         expr("panel", ALL),
         expr("panels", ALL),
     ],
@@ -522,24 +627,31 @@ pub(crate) static PANEL: Context = Context {
         expr("transparent", ALL),
         key("color", ALL, Form::ColorScheme("color")),
         key("thresholds", ALL, Form::Thresholds("thresholds")),
-        key(
-            "mapping",
-            ALL,
-            Form::Pair {
-                method: "mapping",
-                ty: "ValueMapping",
-                body: &MAPPING,
-            },
-        ),
+        key("mapping", ALL, Form::Mapping("mapping")),
         key(
             "link",
             ALL,
             Form::Pair {
                 method: "link",
-                ty: "DashboardLink",
-                body: &LINK,
+                ty: "DataLink",
+                body: &DATA_LINK,
             },
         ),
+        key(
+            "data_link",
+            ALL,
+            Form::Pair {
+                method: "data_link",
+                ty: "DataLink",
+                body: &DATA_LINK,
+            },
+        ),
+        key("repeat", ALL, Form::Repeat("repeat")),
+        expr("min_interval", ALL),
+        expr("max_data_points", ALL),
+        expr("time_from", ALL),
+        expr("time_shift", ALL),
+        expr("hide_time_override", ALL),
         key("override", ALL, Form::Override),
         key("transform", ALL, Form::Transform),
         key("option", ALL, Form::Json("option")),
@@ -612,9 +724,13 @@ pub(crate) static PANEL: Context = Context {
                 body: &LEGEND,
             },
         ),
-        // Table.
-        key("sort_by", TABLE, Form::SortBy("sort_by")),
-        key("cell", TABLE, Form::Cell { bare: "cell" }),
+        // Table and keyed table.
+        key("sort_by", TABLES, Form::SortBy("sort_by")),
+        key("cell", TABLES, Form::Cell { bare: "cell" }),
+        // Keyed table.
+        key("key_name", KEYED_TABLE, Form::Keyed("key_name")),
+        key("column", KEYED_TABLE, Form::Column { trend: false }),
+        key("trend", KEYED_TABLE, Form::Column { trend: true }),
         // Heatmap.
         key(
             "color_mode",
@@ -639,8 +755,7 @@ pub(crate) static QUERY: Context = Context {
     keys: &[
         expr("legend_format", ALL),
         expr("ref_id", ALL),
-        expr("instant", ALL),
-        expr("range", ALL),
+        key("query_type", ALL, Form::Enum("query_type", &QUERY_TYPE)),
         expr("datasource", ALL),
         expr("hidden", ALL),
         expr("interval", ALL),
@@ -650,6 +765,13 @@ pub(crate) static QUERY: Context = Context {
             Form::Enum("editor_mode", &QUERY_EDITOR_MODE),
         ),
         key("format", PROMQL, Form::Enum("format", &PROMETHEUS_FORMAT)),
+        // Field configuration for the fields this query returns.
+        key("unit", ALL, Form::Unit("unit")),
+        key("color", ALL, Form::Color("color")),
+        expr("display_name", ALL),
+        expr("decimals", ALL),
+        key("thresholds", ALL, Form::Thresholds("thresholds")),
+        expr("field_property", ALL),
     ],
 };
 
@@ -700,6 +822,49 @@ pub(crate) static LINK: Context = Context::new(
         expr("include_vars", ALL),
         expr("keep_time", ALL),
         expr("tags", ALL),
+    ],
+);
+
+/// The options of a panel or field data link.
+pub(crate) static DATA_LINK: Context = Context::new(
+    "data link block",
+    "__panelist_link",
+    &[
+        expr("target_blank", ALL),
+        expr("include_vars", ALL),
+        expr("keep_time", ALL),
+    ],
+);
+
+pub(crate) static ANNOTATION: Context = Context::new(
+    "annotation block",
+    "__panelist_annotation",
+    &[
+        expr("datasource", ALL),
+        expr("enable", ALL),
+        expr("hide", ALL),
+        key("icon_color", ALL, Form::Color("icon_color")),
+        expr("step", ALL),
+        expr("title_format", ALL),
+        expr("text_format", ALL),
+        expr("tag_keys", ALL),
+        expr("use_value_for_time", ALL),
+    ],
+);
+
+/// The field properties of a keyed table column.
+pub(crate) static COLUMN: Context = Context::new(
+    "column block",
+    "__panelist_column",
+    &[
+        key("unit", ALL, Form::Unit("unit")),
+        expr("min", ALL),
+        expr("max", ALL),
+        expr("decimals", ALL),
+        key("color", ALL, Form::Color("color")),
+        key("thresholds", ALL, Form::Thresholds("thresholds")),
+        key("cell", ALL, Form::Cell { bare: "cell" }),
+        expr("property", ALL),
     ],
 );
 
@@ -765,6 +930,16 @@ pub(crate) static OVERRIDE: Context = Context::new(
         expr("decimals", ALL),
         expr("display_name", ALL),
         key("thresholds", ALL, Form::Thresholds("thresholds")),
+        key("mapping", ALL, Form::Mapping("mapping")),
+        key(
+            "data_link",
+            ALL,
+            Form::Pair {
+                method: "data_link",
+                ty: "DataLink",
+                body: &DATA_LINK,
+            },
+        ),
     ],
 );
 
@@ -876,6 +1051,8 @@ pub(crate) enum TransformForm {
         ty: &'static str,
         vocab: &'static Vocab,
     },
+    /// `name(<a>, <b>)` builds `ty::new(a, b)`.
+    CallWithTwo { ty: &'static str },
     /// `name { … }`, or a bare `name` when `bare` is set.
     Block {
         ty: &'static str,
@@ -898,6 +1075,12 @@ pub(crate) static TRANSFORMS: &[(&str, TransformForm)] = &[
         TransformForm::CallWithArgument {
             ty: "SortBy",
             vocab: &SORT_DIRECTION,
+        },
+    ),
+    (
+        "rename_by_regex",
+        TransformForm::CallWithTwo {
+            ty: "RenameByRegex",
         },
     ),
     (
@@ -931,10 +1114,6 @@ pub(crate) static TRANSFORMS: &[(&str, TransformForm)] = &[
 pub(crate) static TRANSFORM_SCOPES: &[(&str, &str)] =
     &[("ref_id", "only_ref_id"), ("frame_name", "only_frame_name")];
 
-/// Keys of a thresholds block. Steps are written `<value> => <color>;` and
-/// have no key.
-pub(crate) static THRESHOLD_KEYS: &[&str] = &["base", "mode", "green", "yellow", "red"];
-
-/// The legacy named steps, as `(key, builder method)`.
-pub(crate) static THRESHOLD_NAMED_STEPS: &[(&str, &str)] =
-    &[("green", "green"), ("yellow", "yellow"), ("red", "red")];
+/// Keys of a thresholds block besides the steps, which are written
+/// `<value> => <color>;` or, for a color word, `<color>: <value>;`.
+pub(crate) static THRESHOLD_KEYS: &[&str] = &["base", "mode"];

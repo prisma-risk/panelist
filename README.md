@@ -137,7 +137,7 @@ let dashboard = dashboard! {
 
 A title runs up to the `{` that opens its block. Wrap one that contains a block of its own in parentheses: `stat (if critical { "Errors!" } else { "Errors" }) { … }`.
 
-Thresholds take a mandatory base color and then ascending `value => color` steps. A color is one of the named colors, a string naming any other Grafana color, or a `Color` expression:
+Thresholds take a mandatory base color, the color below the lowest step, and then ascending steps. Write the base as `thresholds(<color>) { … }` or as `base: <color>;` inside the block. A step is `<value> => <color>`, where the color is a named color, a string naming any other Grafana color, or a `Color` expression, or `<color word>: <value>` for a named color:
 
 ```rust
 use panelist::prelude::*;
@@ -160,7 +160,7 @@ let dashboard = dashboard! {
 # let _ = dashboard;
 ```
 
-The older `green: 0.0; yellow: 1.0; red: 5.0;` shorthand still works on its own.
+`mode: percentage;` makes the steps percentages of the field's range.
 
 Dashboard links, cursor sync, and the full variable surface are reachable
 too:
@@ -268,6 +268,38 @@ let dashboard = dashboard! {
 
 `color_mode` is shared between stat and heatmap panels and takes a different vocabulary on each: `value`/`background`/`none` versus `scheme`/`opacity`. A key that takes a word also takes any expression of the builder argument's type, such as `unit: Unit::custom("USD");`. A lone identifier is read as a word, so wrap a local variable in parentheses: `orientation: (orientation);`.
 
+Thresholds always name their base color first: it applies below the first step. Field colors, units, and query evaluation are typed too:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "Checkout";
+    datasource: prometheus("prometheus-main");
+
+    stat "Revenue today" {
+        query: promql!("sum(increase(checkout_revenue_total[1d]))") {
+            query_type: instant;
+        }
+        unit: currency(Currency::Usd);
+
+        thresholds(red) {
+            yellow: 10000.0;
+            green: 50000.0;
+        }
+    }
+
+    timeseries "Requests by instance" {
+        query: promql!("sum by (instance) (rate(http_requests_total{job=\"checkout\"}[$__rate_interval]))");
+        unit: reqps;
+        color: by_name;
+    }
+};
+# let _ = dashboard;
+```
+
+`color: by_name` keys each series' color on its name, so `$instance` values keep their colors when instances come and go. The positional `classic_palette` shifts every later series to a new color whenever one appears or disappears; keep it for a small, fixed set of series. `fixed(..)`, `shades(..)`, `thresholds`, and `continuous(..)` with a palette word such as `blue_yellow_red` cover the other Grafana color modes.
+
 Table panels can transform, sort, and style their columns without leaving
 the DSL:
 
@@ -283,7 +315,7 @@ let dashboard = dashboard! {
             query: promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))") {
                 ref_id: "A";
                 format: table;
-                instant: true;
+                query_type: instant;
             }
             width: 24;
 
@@ -305,9 +337,7 @@ let dashboard = dashboard! {
 
 Table configuration stays typed throughout:
 
-- Transformations: `join_by_field`, `sort_by`, `organize`,
-  `time_series_to_table`, and `labels_to_fields`. Scope any of them to one
-  query with `only ref_id(..)`.
+- Transformations: `join_by_field`, `sort_by`, `rename_by_regex`, `organize`, `time_series_to_table`, and `labels_to_fields`. Scope any of them to one query with `only ref_id(..)` or `only frame_name(..)`, or `.only_ref_id(..)` on the builder.
 - Field matchers: `field(name)`, `regex(pattern)`, `type(field_type)`,
   `query(ref_id)`, `names([..])`, `numeric`, and `time`.
 - Cell renderers: `auto`, `colored_text`, `colored_background`, `gauge`, and
@@ -317,7 +347,43 @@ Set a default renderer with `cell: <type>;` on the table, or set one inside an
 `override` for selected fields. For transformations Panelist does not model,
 `transform: <expr>;` accepts a `RawTransformation` or `Transformation` value.
 
-The most common multi-query table, one row per label value and one column per query, has its own builder. `keyed` turns a configured table into a `KeyedTable`, and each `Column` names its header once:
+The most common multi-query table, one row per label value and one column per query, has its own panel kind. `keyed_table <title> by <label>` takes every table key, plus `key_name`, `column <name> => <query>`, and `trend <reducer> <name> => <query>`, and each column names its header once:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "Routes";
+    datasource: prometheus("prometheus-main");
+
+    row "Routes" {
+        keyed_table "Route performance" by "route" {
+            width: 24;
+            sort_by: ("p95", desc);
+            key_name: "Route";
+
+            column "RPS" => promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))") {
+                unit: reqps;
+            }
+            column "p95" => promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))") {
+                unit: seconds;
+                cell: colored_background;
+                thresholds(green) {
+                    yellow: 0.3;
+                    red: 1.0;
+                }
+            }
+            trend last "Trend" => promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))") {
+                cell: sparkline { hide_value: true; };
+            }
+        }
+    }
+};
+dashboard.validate()?;
+# Ok::<(), panelist::Error>(())
+```
+
+The builder form is the same thing. `keyed` turns a configured table into a `KeyedTable`:
 
 ```rust
 use panelist::prelude::*;
@@ -335,7 +401,7 @@ let routes = Table::new("Route performance")
         Column::new("p95", promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
             .unit(Unit::Seconds)
             .cell(TableCellType::ColoredBackground)
-            .thresholds(Thresholds::new().green(0.0).yellow(0.3).red(1.0)),
+            .thresholds(Thresholds::absolute(Color::Green).step(0.3, Color::Yellow).step(1.0, Color::Red)),
     )
     .column(
         Column::trend("Trend", promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))"), Reducer::Last)
@@ -348,7 +414,7 @@ let dashboard = Dashboard::new("Routes")
 # let _ = dashboard;
 ```
 
-It lowers into the ordinary table you would otherwise write by hand: instant `format: table` queries for value columns and a range query for each trend, reference IDs, a time-series-to-table step for the trends, an outer join on the key, an organize step that renames Grafana's `Value #<refId>` and `Trend #<refId>` fields to the column names and orders them, and one override per column. Anything set on the table before `keyed` comes after the lowering, so extra overrides win and extra transformations see the column names. The join is Grafana's plain outer join: the tabular outer join expands into one row per key per query on Grafana 11.5. A key is one label, because Grafana joins on one field; build a combined label with PromQL's `label_join` to key on several. The `dashboard!` macro has no keyed-table syntax yet, so add a keyed table to a row with `panels: [..];`.
+It lowers into the ordinary table you would otherwise write by hand: instant `format: table` queries for value columns and a range query for each trend, reference IDs, a time-series-to-table step for the trends, an outer join on the key, an organize step that renames Grafana's `Value #<refId>` and `Trend #<refId>` fields to the column names and orders them, and one override per column. Anything set on the table before `keyed` comes after the lowering, so extra overrides win and extra transformations see the column names. The join is Grafana's plain outer join: the tabular outer join expands into one row per key per query on Grafana 11.5. A key is one label, because Grafana joins on one field; build a combined label with PromQL's `label_join` to key on several.
 
 Heatmap panels configure their color scale and Y axis directly:
 
@@ -380,6 +446,48 @@ let dashboard = dashboard! {
 };
 # let _ = dashboard;
 ```
+
+Repeats, time overrides, value mappings, data links, and annotations are one line each:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = dashboard! {
+    title: "API";
+    datasource: prometheus("prometheus-main");
+
+    variable "instance" {
+        query: promql!("label_values(up{job=\"api\"}, instance)");
+        multi: true;
+    }
+
+    annotation "Restarts" => "changes(process_start_time_seconds{job=\"api\"}[2m]) > 0" {
+        text_format: "{{instance}} restarted";
+        icon_color: orange;
+    }
+
+    stat "Up on $instance" {
+        query: promql!("up{instance=\"$instance\"}");
+        repeat: horizontal("instance", 4);
+        time_from: "1h";
+        min_interval: "30s";
+
+        mapping "1" => "Up" { color: green; }
+        mapping range(0.0, 0.5) => "Degraded" { color: yellow; }
+        mapping special(null) => "No data";
+
+        link "Runbook" => "https://runbook.example/api";
+        data_link "Logs" => "/explore?instance=${__field.labels.instance}" {
+            keep_time: true;
+        }
+    }
+};
+# let _ = dashboard;
+```
+
+Grafana expands a repeat when the dashboard loads, so Panelist lays out the authored panel once. A horizontal repeat always spans the full row, because Grafana stretches it to 24 columns and splits that row between the clones, `max_per_row` at a time (4 by default). A vertical repeat keeps the panel's width. `Row::repeat` repeats a whole row. Repeating by a variable the dashboard does not declare is a validation error.
+
+Value mappings come in Grafana's four kinds: exact `value`, numeric `range`, `regex`, and `special` (null, NaN, null or NaN, true, false, empty). Panelist emits them the way Grafana's mapping editor saves them, so exact values take precedence over the other kinds. `link` adds a link to the panel header and `data_link` adds one to the field values; both are Grafana data links, and `DataLinkVariable` spells the built-in `${__value.raw}`-style variables. `annotation` adds a typed Prometheus annotation query, and `RawAnnotation` covers other datasources.
 
 Mistakes are compile errors at the token that caused them. A typo names the closest valid key and lists every key the block accepts. A key that does not apply to the panel kind says which kinds it applies to:
 
@@ -415,20 +523,72 @@ let dashboard = Dashboard::new("HTTP")
 # let _ = dashboard;
 ```
 
+A query can carry its own field properties, so styling one query's series needs no hand-picked reference ID. Panelist emits them as a field override on the reference ID the query resolves to, ahead of the panel's own overrides, so a panel-level override can still refine one series:
+
+```rust
+use panelist::prelude::*;
+
+let panel = Timeseries::new("Requests and errors")
+    .query(
+        PrometheusQuery::new("sum(rate(http_requests_total[$__rate_interval]))")
+            .legend_format("requests")
+            .color(Color::Green),
+    )
+    .query(
+        PrometheusQuery::new("sum(rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))")
+            .legend_format("errors")
+            .color(Color::Red),
+    )
+    .unit(Unit::RequestsPerSecond)
+    .thresholds(Thresholds::absolute(Color::Green).step(100.0, Color::Red));
+# let _ = panel;
+```
+
+One panel can query several datasources through Grafana's mixed datasource. Each query then names its own, and validation reports one that does not:
+
+```rust
+use panelist::prelude::*;
+
+let panel = Timeseries::new("Requests and error logs")
+    .datasource(DataSource::mixed())
+    .query(
+        PrometheusQuery::new("sum(rate(http_requests_total[$__rate_interval]))")
+            .datasource(prometheus("prometheus-main")),
+    )
+    .query(
+        LokiQuery::new("sum(count_over_time({job=\"api\"} |= \"error\" [$__interval]))")
+            .datasource(loki("loki-main")),
+    );
+# let _ = panel;
+```
+
 The typed API covers:
 
 - dashboards, rows, datasources, time ranges, links, and persisted variable
   state;
-- Prometheus and Loki queries, including time-series, table, and heatmap
-  result formats;
+- Prometheus and Loki queries, including range, instant, and combined evaluations, time-series, table, and heatmap result formats, per-query field properties, and the mixed datasource;
 - datasource, query, custom, and constant variables;
-- field defaults, value mappings, thresholds, legends, overrides, and field
-  matchers;
+- field defaults, units including every Grafana currency, value, range, regex, and special value mappings, field data links, thresholds, color schemes, legends, overrides, and field matchers;
+- panel repeats, row repeats, query options, and relative time overrides;
+- Prometheus annotation queries and Grafana's built-in annotation entry;
 - transformations, keyed multi-query tables, table cells and sorting, heatmaps, and the common options for stat, time-series, gauge, and bar-gauge panels.
 
 When Grafana supports something Panelist does not model yet, use `RawQuery`,
 `RawPanel`, `RawTransformation`, or the ordered `extra`, `option`, and `custom`
 methods.
+
+A `RawQuery` emits only the keys you set. `RawQuery::new().expression(..)` writes `expr` for Prometheus-compatible datasources, and a datasource without expressions, such as CloudWatch, takes its whole query from `.extra(..)`:
+
+```rust
+use panelist::prelude::*;
+use serde_json::json;
+
+let query = RawQuery::new()
+    .datasource(DataSource::new("cloudwatch", "cloudwatch-main"))
+    .extra("namespace", json!("AWS/EC2"))
+    .extra("metricName", json!("CPUUtilization"));
+# let _ = query;
+```
 
 Real-world provisioning metadata and visualization choices remain typed:
 
@@ -568,6 +728,10 @@ dashboard.write_json("dashboard.json")?;
 
 Validation reports duplicate explicit panel IDs and query refs, stable panel ID collisions, dashboard UIDs Grafana would refuse, missing titles or expressions, invalid widths and positions, zero heights, and malformed threshold ordering. Invalid authored dashboards return errors instead of panicking.
 
+It also rejects repeats by undeclared variables, malformed minimum intervals and time overrides, value mappings that can never match or change nothing, duplicate exact-value mappings, and annotations without a name or expression.
+
+It also catches query setups Grafana would run differently from how they read: a query on a mixed panel without a datasource of its own, and a Loki query that asks for a combined range-and-instant evaluation Loki cannot run.
+
 ## Rendering a directory
 
 Dashboards as code usually means committing the generated JSON, so reviewers see the wire diff and Grafana can provision the files. `DashboardSet` writes a set of dashboards into a directory and checks that directory in CI:
@@ -599,7 +763,6 @@ fn main() -> ExitCode {
 ```
 
 Each dashboard becomes `<uid>.json`: validated, pretty-printed JSON with a trailing newline. A dashboard without a UID, or two dashboards sharing one (ignoring case, for case-insensitive filesystems), is an error. `check_dir` never writes; it fails with a report listing every stale file, every missing file, and every orphaned `.json` file that no dashboard renders to anymore. `write_dir` removes the orphans, rewrites only files whose contents changed, and replaces each file atomically. Other files in the directory are left alone.
-
 
 ### Variable references
 
@@ -677,9 +840,7 @@ screenshots from that stack, so an image cannot drift from its example.
 - Wire `scripts/verify-grafana.sh` (`make verify-grafana`) into CI so every change is validated against a live Grafana for every target automatically. The check already round-trips every golden through Grafana 11.5.2 and 13.0.2 cleanly; it just isn't triggered on every push yet.
 - Add targets for the Grafana releases in between (11.6 through 12.1 use `schemaVersion` 41) once each has a verified golden round trip.
 - Add an opt-in Grafana V2 resource serializer and dynamic layouts.
-- Add annotations, range/regex value mappings, and data links; add more
-  transformation types beyond the five modeled today (join, sort, organize,
-  time-series-to-table, labels-to-fields).
+- Add more transformation types beyond the six modeled today (join, sort, organize, time-series-to-table, labels-to-fields, rename-by-regex).
 - Add more datasource query types without turning the core crate into an API
   client.
 - Stabilize the API from real-world dashboard authoring feedback.

@@ -23,6 +23,9 @@
 
 use serde::Serialize;
 
+const MIXED_KIND: &str = "datasource";
+const MIXED_UID: &str = "-- Mixed --";
+
 /// A Grafana datasource reference.
 ///
 /// Grafana identifies modern datasources by plugin type and UID. The optional
@@ -46,6 +49,37 @@ impl DataSource {
             uid: uid.into(),
             name: None,
         }
+    }
+
+    /// Grafana's built-in `-- Mixed --` datasource, which lets one panel run queries against several datasources.
+    ///
+    /// A mixed panel only dispatches: each query names its own datasource with `.datasource(…)`, and validation reports a query that does not. Inheriting the panel's datasource would hand that query the mixed datasource itself, and Grafana skips any target that names it.
+    ///
+    /// ```rust
+    /// use panelist::prelude::*;
+    ///
+    /// let panel = Timeseries::new("Requests vs. errors")
+    ///     .datasource(DataSource::mixed())
+    ///     .query(
+    ///         PrometheusQuery::new("sum(rate(http_requests_total[$__rate_interval]))")
+    ///             .datasource(prometheus("metrics")),
+    ///     )
+    ///     .query(
+    ///         LokiQuery::new(r#"sum(count_over_time({job="api"} |= "error" [$__interval]))"#)
+    ///             .datasource(loki("logs")),
+    ///     );
+    /// # let _ = panel;
+    /// ```
+    #[must_use]
+    pub fn mixed() -> Self {
+        // Built-in datasources have no database row, so Grafana serves them with the plugin's own type (`"datasource"`, from the mixed plugin's `plugin.json`) and uses the plugin name as the UID (`pkg/api/frontendsettings.go` and `datasource_srv.ts` at v13.0.2).
+        Self::new(MIXED_KIND, MIXED_UID).name("-- Mixed --")
+    }
+
+    /// Returns `true` for Grafana's built-in mixed datasource.
+    #[must_use]
+    pub fn is_mixed(&self) -> bool {
+        self.kind == MIXED_KIND && self.uid == MIXED_UID
     }
 
     /// Adds a human-readable name without changing the serialized identity.

@@ -172,13 +172,33 @@ pub enum ValidationError {
         /// Duplicate query reference.
         ref_id: String,
     },
-    /// A query expression is empty.
+    /// A query expression is empty, or a raw query sets neither an expression nor any extra key.
     #[error("panel \"{panel}\": query expression must not be empty")]
     MissingQueryExpression {
         /// Panel title.
         panel: String,
     },
-    /// Threshold values are not strictly increasing.
+    /// A Loki query asks for [`crate::QueryType::Both`]. Loki has no combined range-and-instant mode, so the query would silently run as instant only.
+    #[error(
+        "panel \"{panel}\": Loki query \"{ref_id}\" asks for both range and instant results, which Loki cannot run as one query; split it into two queries"
+    )]
+    UnsupportedQueryType {
+        /// Panel title.
+        panel: String,
+        /// Resolved reference ID of the query.
+        ref_id: String,
+    },
+    /// A panel uses [`crate::DataSource::mixed`], directly or by inheriting it, and one of its queries names no datasource of its own. Grafana would run that query against its default datasource.
+    #[error(
+        "panel \"{panel}\": query \"{ref_id}\" sets no datasource, but the panel uses the mixed datasource; give each query its own"
+    )]
+    MissingMixedQueryDataSource {
+        /// Panel title.
+        panel: String,
+        /// Resolved reference ID of the query.
+        ref_id: String,
+    },
+    /// Threshold values are not strictly increasing, in the panel's thresholds or in any override or query thresholds on it.
     #[error("panel \"{panel}\": threshold values must be finite and strictly increasing")]
     InvalidThresholds {
         /// Panel title.
@@ -332,6 +352,49 @@ pub enum ValidationError {
         /// The referenced variable, declared later or the variable itself.
         name: String,
     },
+    /// A panel or row repeats by a variable the dashboard does not declare, so Grafana would never expand it.
+    #[error(
+        "{kind} \"{title}\": repeats by variable \"{variable}\", which the dashboard does not declare"
+    )]
+    UnknownRepeatVariable {
+        /// `"panel"` or `"row"`.
+        kind: &'static str,
+        /// Panel or row title.
+        title: String,
+        /// The undeclared variable name.
+        variable: String,
+    },
+    /// A panel query option, time override, or repeat setting has a value Grafana cannot use.
+    #[error("panel \"{panel}\": {option} \"{value}\" is invalid; expected {expected}")]
+    InvalidPanelOption {
+        /// Panel title.
+        panel: String,
+        /// The builder option, such as `time_shift`.
+        option: &'static str,
+        /// The rejected value.
+        value: String,
+        /// What Grafana accepts.
+        expected: &'static str,
+    },
+    /// A value mapping can never match, or matches without changing anything.
+    #[error("panel \"{panel}\": value mapping {reason}")]
+    InvalidValueMapping {
+        /// Panel title.
+        panel: String,
+        /// Why the mapping is unusable.
+        reason: &'static str,
+    },
+    /// Two exact-value mappings in one mapping list match the same value. Grafana keys exact values in one object, so only the last would survive.
+    #[error("panel \"{panel}\": more than one value mapping matches the exact value \"{value}\"")]
+    DuplicateValueMapping {
+        /// Panel title.
+        panel: String,
+        /// The value mapped more than once.
+        value: String,
+    },
+    /// An annotation name is empty.
+    #[error("annotation name must not be empty")]
+    MissingAnnotationName,
 }
 
 /// Where a template-variable reference was found.

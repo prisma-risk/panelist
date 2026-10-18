@@ -38,9 +38,10 @@ use quote::{ToTokens, quote};
 use crate::{
     diag::{Diagnostics, describe, unknown_entry, unknown_keyword, word_of_other_kind, wrong_kind},
     spec::{
-        CELL_BLOCKS, CELL_TYPE, Context, DASHBOARD, Form, Key, MATCHERS, Matcher, PANEL,
-        PANEL_KINDS, QUERY, QUERY_KINDS, QUERY_MACROS, ROW, SORT_DIRECTION, STACKING_MODE,
-        TRANSFORM_SCOPES, TRANSFORMS, TransformForm, VARIABLE,
+        ANNOTATION, CELL_BLOCKS, CELL_TYPE, COLUMN, Context, DASHBOARD, Form, KEYED_TABLE_INDEX,
+        Key, MAPPING, MATCHERS, Matcher, PANEL, PANEL_KINDS, QUERY, QUERY_KINDS, QUERY_MACROS,
+        REDUCER, ROW, SORT_DIRECTION, STACKING_MODE, TRANSFORM_SCOPES, TRANSFORMS, TransformForm,
+        VARIABLE,
     },
     tokens::{Expr, Stop, Tokens},
     values::{self, value},
@@ -52,6 +53,9 @@ pub(crate) struct Cx {
     /// The path of the `panelist` crate, as `$crate` from the wrapper.
     krate: TokenStream,
     diagnostics: Diagnostics,
+    /// Statements for the keyed table a `keyed_table` panel becomes, which
+    /// run after every table statement. `Some` only while one is lowered.
+    keyed: Option<TokenStream>,
 }
 
 impl Cx {
@@ -93,6 +97,7 @@ pub(crate) fn dashboard(input: TokenStream) -> TokenStream {
     let mut cx = Cx {
         krate,
         diagnostics: Diagnostics::default(),
+        keyed: None,
     };
 
     let title = match title(&mut tokens) {
@@ -329,10 +334,16 @@ fn lower(
             self::body(cx, body, None, receiver, &mut Tokens::inside(&group))
         }
         Form::Thresholds(method) => {
+            let base = if tokens.is_group(Delimiter::Parenthesis) {
+                let group = tokens.expect_group(Delimiter::Parenthesis, "`(<base color>)`")?;
+                Some(Expr::from_stream(group.stream()))
+            } else {
+                None
+            };
             let group =
                 tokens.expect_group(Delimiter::Brace, &format!("`{{ … }}` after `{name}`"))?;
             tokens.eat_punct(';');
-            call(method, values::thresholds(cx, name, &group))
+            called(method, values::thresholds(cx, name, base.as_ref(), &group))
         }
         Form::Query(method) => {
             tokens.expect_colon(name)?;
@@ -353,30 +364,59 @@ fn lower(
             call(method, quote!(#field, #json::serde_json::json!(#value)))
         }
         Form::Pair { method, ty, body } => {
-            let left = tokens.take_until(Stop::SEMI_OR_FAT_ARROW);
-            if left.is_empty() {
-                return Err(tokens.error(format!("expected `{name} <expr> => <expr>`")));
-            }
-            tokens.expect_fat_arrow(&format!("the first value of `{name}`"))?;
-            let right = tokens.take_until(Stop::SEMI_OR_BRACE);
-            if right.is_empty() {
-                return Err(tokens.error(format!("expected a value after `{name} … =>`")));
-            }
+            let (left, right) = pair(tokens, name)?;
             let init = {
                 let ty = cx.path(ty, span);
                 quote!(#ty::new(#left, #right))
             };
-            if tokens.is_group(Delimiter::Brace) {
-                let group = tokens.expect_group(Delimiter::Brace, "`{ … }`")?;
-                tokens.eat_punct(';');
-                call(
-                    method,
-                    block(cx, body, None, init, &group, TokenStream::new()),
-                )
+            call(method, pair_block(cx, body, init, tokens, name)?)
+        }
+        Form::Mapping(method) => {
+            let (left, right) = pair(tokens, name)?;
+            let mapping = mapping(cx, span, &left, &right);
+            let block = pair_block(
+                cx,
+                &MAPPING,
+                mapping.clone().unwrap_or_default(),
+                tokens,
+                name,
+            )?;
+            called(method, mapping.map(|_| block))
+        }
+        Form::Annotation => {
+            if tokens.is_colon() {
+                tokens.expect_colon(name)?;
+                call("annotation", value(tokens, name)?.to_token_stream())
             } else {
-                tokens.expect_semi(&format!("`{name} … => …`"))?;
-                call(method, init)
+                let (left, right) = pair(tokens, name)?;
+                let init = {
+                    let ty = cx.path("PrometheusAnnotation", span);
+                    quote!(#ty::new(#left, #right))
+                };
+                call(
+                    "annotation",
+                    pair_block(cx, &ANNOTATION, init, tokens, name)?,
+                )
             }
+        }
+        Form::Repeat(method) => {
+            tokens.expect_colon(name)?;
+            let value = value(tokens, name)?;
+            called(method, repeat(cx, &value))
+        }
+        Form::Keyed(method) => {
+            tokens.expect_colon(name)?;
+            let value = value(tokens, name)?;
+            keyed(cx, call_on_keyed(span, method, value.to_token_stream()))
+        }
+        Form::Column { trend } => {
+            let column = column(cx, name, *trend, tokens)?;
+            keyed(
+                cx,
+                column.map_or_else(TokenStream::new, |column| {
+                    call_on_keyed(span, "column", column)
+                }),
+            )
         }
         Form::Override => call("override_field", field_override(cx, name, tokens)?),
         Form::Transform => called("transform", transform(cx, name, tokens)?),
@@ -445,6 +485,155 @@ fn list_constructor(cx: &mut Cx, value: &Expr, ty: &str, fields: &[&str]) -> Opt
     Some(quote!(#ty::new(#(#elements),*)))
 }
 
+/// Reads `<a> => <b>` up to a `;` or a `{ … }` block, which stays unread.
+fn pair(tokens: &mut Tokens, name: &Ident) -> syn::Result<(Expr, Expr)> {
+    let left = tokens.take_until(Stop::SEMI_OR_FAT_ARROW);
+    if left.is_empty() {
+        return Err(tokens.error(format!("expected `{name} <expr> => <expr>`")));
+    }
+    tokens.expect_fat_arrow(&format!("the first value of `{name}`"))?;
+    let right = tokens.take_until(Stop::SEMI_OR_BRACE);
+    if right.is_empty() {
+        return Err(tokens.error(format!("expected a value after `{name} … =>`")));
+    }
+    Ok((left, right))
+}
+
+/// `init` with the optional `{ … }` block after a pair applied to it, or
+/// `init` alone when the pair ends in `;`.
+fn pair_block(
+    cx: &mut Cx,
+    body: &'static Context,
+    init: TokenStream,
+    tokens: &mut Tokens,
+    name: &Ident,
+) -> syn::Result<TokenStream> {
+    if tokens.is_group(Delimiter::Brace) {
+        let group = tokens.expect_group(Delimiter::Brace, "`{ … }`")?;
+        tokens.eat_punct(';');
+        Ok(block(cx, body, None, init, &group, TokenStream::new()))
+    } else {
+        tokens.expect_semi(&format!("`{name} … => …`"))?;
+        Ok(init)
+    }
+}
+
+/// The `ValueMapping` a `mapping <match> => <text>` builds: `range(<from>,
+/// <to>)`, `regex(<pattern>)`, and `special(<value>)` select those kinds,
+/// and anything else is an exact value.
+fn mapping(cx: &mut Cx, span: Span, matched: &Expr, text: &Expr) -> Option<TokenStream> {
+    let ty = cx.path("ValueMapping", span);
+    let kind = match matched.as_call() {
+        Some((name, inner)) if name == "range" => {
+            let bounds = crate::tokens::split_commas(inner.to_token_stream());
+            let [from, to] = bounds.as_slice() else {
+                cx.error(syn::Error::new_spanned(
+                    matched,
+                    "expected `range(<from>, <to>)`",
+                ));
+                return None;
+            };
+            let method = Ident::new("range", name.span());
+            quote!(#ty::#method(#from, #to))
+        }
+        Some((name, inner)) if name == "regex" => {
+            let method = Ident::new("regex", name.span());
+            quote!(#ty::#method(#inner))
+        }
+        Some((name, inner)) if name == "special" => {
+            let special = values::special_value(cx, &inner)?;
+            let method = Ident::new("special", name.span());
+            quote!(#ty::#method(#special))
+        }
+        _ => quote!(#ty::value(#matched)),
+    };
+    Some(quote!(#kind.text(#text)))
+}
+
+/// `horizontal(<variable>[, <max per row>])` and `vertical(<variable>)`
+/// build a `Repeat`; any other expression is passed through.
+fn repeat(cx: &mut Cx, value: &Expr) -> Option<TokenStream> {
+    let Some((name, inner)) = value.as_call() else {
+        return Some(value.to_token_stream());
+    };
+    let ty = cx.path("Repeat", name.span());
+    let arguments = crate::tokens::split_commas(inner.to_token_stream());
+    match (name.to_string().as_str(), arguments.as_slice()) {
+        ("horizontal", [variable]) => Some(quote!(#ty::#name(#variable))),
+        ("horizontal", [variable, per_row]) => {
+            Some(quote!(#ty::#name(#variable).max_per_row(#per_row)))
+        }
+        ("vertical", [variable]) => Some(quote!(#ty::#name(#variable))),
+        ("horizontal" | "vertical", _) => {
+            cx.error(syn::Error::new_spanned(
+                value,
+                "expected `horizontal(<variable>)`, `horizontal(<variable>, <max per row>)`, or `vertical(<variable>)`",
+            ));
+            None
+        }
+        _ => Some(value.to_token_stream()),
+    }
+}
+
+/// `let keyed = keyed.method(arguments);` on the keyed table.
+fn call_on_keyed(span: Span, method: &str, arguments: TokenStream) -> TokenStream {
+    call(&local(KEYED_VAR), span, method, arguments)
+}
+
+const KEYED_VAR: &str = "__panelist_keyed";
+
+/// Defers statements on the keyed table until the table keys are applied.
+fn keyed(cx: &mut Cx, statements: TokenStream) -> TokenStream {
+    match &mut cx.keyed {
+        Some(keyed) => {
+            keyed.extend(statements);
+            TokenStream::new()
+        }
+        None => statements,
+    }
+}
+
+/// A keyed table column: `column <name> => <query> [{ … }]`, or
+/// `trend <reducer> <name> => <query> [{ … }]`.
+fn column(
+    cx: &mut Cx,
+    keyword: &Ident,
+    trend: bool,
+    tokens: &mut Tokens,
+) -> syn::Result<Option<TokenStream>> {
+    let reducer = if trend {
+        Some(tokens.expect_ident("a reducer such as `last` after `trend`")?)
+    } else {
+        None
+    };
+    let (name, query) = pair(tokens, keyword)?;
+    let query = match query.as_call_of_macro("promql") {
+        Some(arguments) => {
+            let ty = cx.path("PrometheusQuery", keyword.span());
+            quote!(#ty::new(#arguments))
+        }
+        None => query.to_token_stream(),
+    };
+    let ty = cx.path("Column", keyword.span());
+    let init = match reducer {
+        None => Some(quote!(#ty::new(#name, #query))),
+        Some(reducer) => values::word(
+            cx,
+            &REDUCER,
+            &Expr::from_stream(reducer.into_token_stream()),
+        )
+        .map(|reducer| quote!(#ty::trend(#name, #query, #reducer))),
+    };
+    let column = pair_block(
+        cx,
+        &COLUMN,
+        init.clone().unwrap_or_default(),
+        tokens,
+        keyword,
+    )?;
+    Ok(init.map(|_| column))
+}
+
 /// What a panel or row is started from.
 enum Head {
     Title(Expr),
@@ -453,19 +642,61 @@ enum Head {
 
 /// `<title> { … }` or `from <builder> { … }` after a panel or row keyword.
 fn head(tokens: &mut Tokens, keyword: &Ident, what: &str) -> syn::Result<(Head, Group)> {
-    if tokens.is_ident("from") {
+    let (head, by, group) = head_by(tokens, keyword, what, false)?;
+    debug_assert!(by.is_none(), "`by` is only read for keyed tables");
+    Ok((head, group))
+}
+
+/// [`head`], reading `by <key>` before the block when `keyed` is set.
+fn head_by(
+    tokens: &mut Tokens,
+    keyword: &Ident,
+    what: &str,
+    keyed: bool,
+) -> syn::Result<(Head, Option<Expr>, Group)> {
+    let stop = if keyed {
+        Stop::TITLE_OR_BY
+    } else {
+        Stop::TITLE
+    };
+    let head = if tokens.is_ident("from") {
         tokens.next();
-        let base = tokens.take_until(Stop::SEMI_OR_BRACE);
+        let base = tokens.take_until(if keyed {
+            Stop::BASE_OR_BY
+        } else {
+            Stop::SEMI_OR_BRACE
+        });
         if base.is_empty() {
             return Err(tokens.error(format!("expected a {what} builder expression after `from`")));
         }
-        let group = tokens.expect_group(
-            Delimiter::Brace,
-            &format!("`{{ … }}` after the base {what} builder"),
-        )?;
-        return Ok((Head::Base(base), group));
-    }
-    let title = tokens.take_until(Stop::TITLE);
+        Head::Base(base)
+    } else {
+        Head::Title(head_title(tokens, keyword, what, stop)?)
+    };
+    let by = if keyed {
+        if !tokens.is_ident("by") {
+            return Err(tokens.error(format!(
+                "a {what} needs `by <label>` after its title, naming the label its rows are keyed on"
+            )));
+        }
+        tokens.next();
+        let key = tokens.take_until(Stop::SEMI_OR_BRACE);
+        if key.is_empty() {
+            return Err(tokens.error("expected the label to key the table on after `by`"));
+        }
+        Some(key)
+    } else {
+        None
+    };
+    let group = tokens.expect_group(
+        Delimiter::Brace,
+        &format!("`{{ … }}` after the {what} title"),
+    )?;
+    Ok((head, by, group))
+}
+
+fn head_title(tokens: &mut Tokens, keyword: &Ident, what: &str, stop: Stop) -> syn::Result<Expr> {
+    let title = tokens.take_until(stop);
     if tokens.is_ident("from") {
         return Err(syn::Error::new_spanned(
             &title,
@@ -479,11 +710,7 @@ fn head(tokens: &mut Tokens, keyword: &Ident, what: &str) -> syn::Result<(Head, 
             "expected a title expression or `from <builder>` after `{keyword}`"
         )));
     }
-    let group = tokens.expect_group(
-        Delimiter::Brace,
-        &format!("`{{ … }}` after the {what} title"),
-    )?;
-    Ok((Head::Title(title), group))
+    Ok(title)
 }
 
 fn panel(
@@ -494,7 +721,13 @@ fn panel(
     tokens: &mut Tokens,
 ) -> syn::Result<TokenStream> {
     let kind = &PANEL_KINDS[index];
-    let (head, group) = head(tokens, keyword, &format!("`{}` panel", kind.keyword))?;
+    let is_keyed = index == KEYED_TABLE_INDEX;
+    let (head, by, group) = head_by(
+        tokens,
+        keyword,
+        &format!("`{}` panel", kind.keyword),
+        is_keyed,
+    )?;
     tokens.eat_punct(';');
     let ty = cx.path(kind.ty, keyword.span());
     let var = local(PANEL.var);
@@ -505,7 +738,24 @@ fn panel(
             #var
         }),
     };
-    let panel = block(cx, &PANEL, Some(index), init, &group, TokenStream::new());
+    let Some(by) = by else {
+        let panel = block(cx, &PANEL, Some(index), init, &group, TokenStream::new());
+        return Ok(call(receiver, keyword.span(), "panel", panel));
+    };
+    // A keyed table is configured as a table, then turned into a keyed
+    // table, so its keyed-only keys run after every table key.
+    let outer = cx.keyed.replace(TokenStream::new());
+    let statements = body(cx, &PANEL, Some(index), &var, &mut Tokens::inside(&group));
+    let deferred = std::mem::replace(&mut cx.keyed, outer).unwrap_or_default();
+    let keyed = local(KEYED_VAR);
+    let keyed_method = Ident::new("keyed", keyword.span());
+    let panel = quote!({
+        let #var = #init;
+        #statements
+        let #keyed = #var.#keyed_method(#by);
+        #deferred
+        #keyed
+    });
     Ok(call(receiver, keyword.span(), "panel", panel))
 }
 
@@ -738,6 +988,14 @@ fn transform(
                 Some(word) => statements.extend(quote!(let #var = #ty::new(#field, #word);)),
                 None => accepted = false,
             }
+        }
+        TransformForm::CallWithTwo { ty } => {
+            let arguments = arguments(tokens, &name, "(<a>, <b>)")?;
+            let [first, second] = arguments.as_slice() else {
+                return Err(argument_count(&name, "(<a>, <b>)"));
+            };
+            let ty = cx.path(ty, name.span());
+            statements.extend(quote!(let #var = #ty::new(#first, #second);));
         }
         TransformForm::Block { ty, body, bare } => {
             let init = {

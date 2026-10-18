@@ -1,19 +1,19 @@
 error: unknown key `formt` in a `promql!` query; did you mean `format`?
-       keys accepted here: `legend_format`, `ref_id`, `instant`, `range`, `datasource`, `hidden`, `interval`, `editor_mode`, `format`
+       keys accepted here: `legend_format`, `ref_id`, `query_type`, `datasource`, `hidden`, `interval`, `editor_mode`, `format`, `unit`, `color`, `display_name`, `decimals`, `thresholds`, `field_property`
   --> tests/ui/nested_unknown.rs:30:36
    |
 30 |             query: promql!("up") { formt: table; }
    |                                    ^^^^^
 
 error: `format` does not apply to a `loki!` query; it applies to `promql!` queries
-       keys accepted here: `legend_format`, `ref_id`, `instant`, `range`, `datasource`, `hidden`, `interval`, `editor_mode`
+       keys accepted here: `legend_format`, `ref_id`, `query_type`, `datasource`, `hidden`, `interval`, `editor_mode`, `unit`, `color`, `display_name`, `decimals`, `thresholds`, `field_property`
   --> tests/ui/nested_unknown.rs:31:45
    |
 31 |             query: loki!("{job=\"api\"}") { format: table; }
    |                                             ^^^^^^
 
 error: unknown key `colour` in an override block; did you mean `color`?
-       keys accepted here: `color`, `line_width`, `cell`, `unit`, `min`, `max`, `decimals`, `display_name`, `thresholds`
+       keys accepted here: `color`, `line_width`, `cell`, `unit`, `min`, `max`, `decimals`, `display_name`, `thresholds`, `mapping`, `data_link`
   --> tests/ui/nested_unknown.rs:32:37
    |
 32 |             override field("p95") { colour: red; }
@@ -27,7 +27,7 @@ error: unknown field matcher `fiield`; did you mean `field`?
    |                      ^^^^^^
 
 error: unknown transformation `organise`; did you mean `organize`?
-       accepted: `join_by_field`, `sort_by`, `organize`, `time_series_to_table`, `labels_to_fields`
+       accepted: `join_by_field`, `sort_by`, `rename_by_regex`, `organize`, `time_series_to_table`, `labels_to_fields`
        any other transformation is written `transform: <expr>;`
   --> tests/ui/nested_unknown.rs:34:23
    |
