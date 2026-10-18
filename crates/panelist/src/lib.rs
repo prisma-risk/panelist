@@ -88,7 +88,7 @@ pub use transformation::{
     JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, OrganizeFields, RawTransformation,
     SortBy, TimeSeriesToTable, Transformation,
 };
-pub use validation::{Error, Result, ValidationError, ValidationErrors};
+pub use validation::{Error, Result, ValidationError, ValidationErrors, VariableReferenceSite};
 pub use variable::{
     ConstantVariable, CustomVariable, DataSourceVariable, QueryVariable, Variable, VariableBuilder,
     VariableRefresh, VariableSelection, VariableSort,

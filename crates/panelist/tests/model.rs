@@ -21,7 +21,7 @@
 //  limitations under the License.
 //
 
-use panelist::{ValidationError, prelude::*};
+use panelist::{ValidationError, VariableReferenceSite, prelude::*};
 use serde_json::{Value, json};
 
 fn as_value(dashboard: &Dashboard) -> Value {
@@ -1027,4 +1027,369 @@ fn heatmap_options_merge_over_grafana_defaults() {
         json!({"axisPlacement": "right", "unit": "s"})
     );
     assert_eq!(options["calculate"], false);
+}
+
+fn unknown_names(dashboard: &Dashboard) -> Vec<String> {
+    let Err(errors) = dashboard.validate() else {
+        return Vec::new();
+    };
+    errors
+        .errors()
+        .iter()
+        .filter_map(|error| match error {
+            ValidationError::UnknownVariableReference { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn environment() -> CustomVariable {
+    CustomVariable::new("env", ["prod", "staging"])
+}
+
+#[test]
+fn every_reference_syntax_resolves_to_a_declared_variable() {
+    let dashboard = Dashboard::new("Syntaxes").variable(environment()).panel(
+        Timeseries::new("Up")
+            .query(PrometheusQuery::new(r#"up{env="$env"}"#))
+            .query(PrometheusQuery::new(r#"up{env="${env}"}"#))
+            .query(PrometheusQuery::new(r#"up{env=~"${env:regex}"}"#))
+            .query(PrometheusQuery::new(r#"up{env="${env.text}"}"#))
+            .query(PrometheusQuery::new(r#"up{env="[[env]]"}"#))
+            .query(PrometheusQuery::new(r#"up{env=~"[[env:pipe]]"}"#)),
+    );
+
+    dashboard.validate().unwrap();
+}
+
+#[test]
+fn every_reference_syntax_reports_an_unknown_variable() {
+    let dashboard = Dashboard::new("Syntaxes").variable(environment()).panel(
+        Timeseries::new("Up")
+            .query(PrometheusQuery::new(r#"up{a="$plain"}"#))
+            .query(PrometheusQuery::new(r#"up{a="${braced}"}"#))
+            .query(PrometheusQuery::new(r#"up{a=~"${formatted:regex}"}"#))
+            .query(PrometheusQuery::new(r#"up{a="${pathed.text}"}"#))
+            .query(PrometheusQuery::new(r#"up{a="[[bracketed]]"}"#))
+            .query(PrometheusQuery::new(r#"up{a=~"[[bracketed_format:csv]]"}"#)),
+    );
+
+    assert_eq!(
+        unknown_names(&dashboard),
+        [
+            "plain",
+            "braced",
+            "formatted",
+            "pathed",
+            "bracketed",
+            "bracketed_format"
+        ]
+    );
+}
+
+/// `$env_name` is one variable called `env_name` to Grafana, not `$env`
+/// followed by `_name`. Panelist reads it the same way.
+#[test]
+fn a_plain_reference_runs_to_the_end_of_the_word() {
+    let dashboard = Dashboard::new("Greedy").variable(environment()).panel(
+        Stat::new("Up")
+            .query(PrometheusQuery::new(r#"up{job="$env_name"}"#))
+            .query(PrometheusQuery::new(r#"up{job="${env}_name"}"#)),
+    );
+
+    assert_eq!(unknown_names(&dashboard), ["env_name"]);
+}
+
+#[test]
+fn unknown_references_name_the_site_and_field() {
+    let dashboard = Dashboard::new("Sites")
+        .datasource(prometheus("$dashboard_source"))
+        .link(DashboardLink::new(
+            "Runbook",
+            "https://runbooks/$dashboard_link",
+        ))
+        .variable(QueryVariable::new(
+            "pod",
+            PrometheusQuery::new("label_values(up{job=\"$job\"}, pod)"),
+        ))
+        .panel(
+            Timeseries::new("Requests")
+                .datasource(prometheus("$panel_source"))
+                .query(
+                    PrometheusQuery::new("rate(requests_total[$__rate_interval])")
+                        .legend_format("{{route}} $legend")
+                        .datasource(prometheus("$query_source")),
+                )
+                .link(DashboardLink::new("Logs", "/explore?pod=$panel_link")),
+        );
+
+    let errors = dashboard.validate().unwrap_err();
+    let unknown = |site: VariableReferenceSite, field: &'static str, name: &str| {
+        ValidationError::UnknownVariableReference {
+            site,
+            field,
+            name: name.to_owned(),
+        }
+    };
+    let panel = || VariableReferenceSite::Panel("Requests".to_owned());
+    assert_eq!(
+        errors.errors(),
+        [
+            unknown(
+                VariableReferenceSite::Dashboard,
+                "datasource",
+                "dashboard_source"
+            ),
+            unknown(
+                VariableReferenceSite::Dashboard,
+                "link URL",
+                "dashboard_link"
+            ),
+            unknown(
+                VariableReferenceSite::Variable("pod".to_owned()),
+                "query expression",
+                "job"
+            ),
+            unknown(panel(), "datasource", "panel_source"),
+            unknown(panel(), "legend format", "legend"),
+            unknown(panel(), "query datasource", "query_source"),
+            unknown(panel(), "link URL", "panel_link"),
+        ]
+    );
+    assert_eq!(
+        errors.errors()[4].to_string(),
+        "panel \"Requests\": legend format references unknown variable \"legend\""
+    );
+}
+
+#[test]
+fn panels_in_rows_are_checked() {
+    let dashboard = Dashboard::new("Rows").row(
+        Row::new("HTTP").panel(Stat::new("Up").query(PrometheusQuery::new("up{a=\"$missing\"}"))),
+    );
+
+    assert_eq!(unknown_names(&dashboard), ["missing"]);
+}
+
+/// One mistake, one error: a name repeated in one field is reported once.
+#[test]
+fn an_unknown_name_is_reported_once_per_field() {
+    let dashboard = Dashboard::new("Repeated").panel(
+        Stat::new("Ratio")
+            .query(PrometheusQuery::new("a{x=\"$nope\"} / b{x=\"$nope\"}"))
+            .query(PrometheusQuery::new("c{x=\"${nope}\"}").legend_format("$nope")),
+    );
+
+    let errors = dashboard.validate().unwrap_err();
+    let fields: Vec<_> = errors
+        .errors()
+        .iter()
+        .map(|error| match error {
+            ValidationError::UnknownVariableReference { field, .. } => *field,
+            other => panic!("unexpected error: {other}"),
+        })
+        .collect();
+    assert_eq!(fields, ["query expression", "legend format"]);
+}
+
+#[test]
+fn grafana_builtins_need_no_declaration() {
+    let dashboard = Dashboard::new("Builtins")
+        .link(DashboardLink::new(
+            "Same window",
+            "/d/other?${__url_time_range}&${__all_variables}&org=${__org.name}",
+        ))
+        .panel(
+            Timeseries::new("Everything")
+                .query(PrometheusQuery::new(
+                    "rate(a[$__rate_interval]) + rate(b[$__interval]) + rate(c[$__range]) + rate(d[$__auto])",
+                ))
+                .query(PrometheusQuery::new(
+                    "e * $__interval_ms * $__range_s * $__range_ms * $__rate_interval_ms * [[__interval]]",
+                ))
+                .query(
+                    PrometheusQuery::new("f{user=\"${__user.login}\", tz=\"$__timezone\"}")
+                        .legend_format("${__from:date:iso} to ${__to:date:seconds} on $__dashboard"),
+                )
+                .link(DashboardLink::new("Panel", "/d/x?from=$__from&to=$__to&v=$__all")),
+        );
+
+    dashboard.validate().unwrap();
+}
+
+/// A typed Prometheus or Loki query has a fixed macro set, so a misspelt
+/// built-in is still an unknown variable there.
+#[test]
+fn a_misspelt_builtin_in_a_typed_query_is_reported() {
+    let dashboard = Dashboard::new("Typo").panel(
+        Timeseries::new("Requests")
+            .query(PrometheusQuery::new(
+                "rate(requests_total[$__rate_inteval])",
+            ))
+            .query(LokiQuery::new("count_over_time({app=\"x\"}[$__autoo])")),
+    );
+
+    assert_eq!(unknown_names(&dashboard), ["__rate_inteval", "__autoo"]);
+}
+
+/// Panelist cannot know a raw query's plugin, and plugins define their own
+/// macros in Grafana's reserved `__` namespace. Ordinary names are still
+/// checked.
+#[test]
+fn raw_queries_tolerate_plugin_macros_but_not_unknown_variables() {
+    let dashboard = Dashboard::new("SQL").variable(environment()).panel(
+        Table::new("Rows")
+            .query(RawQuery::new(
+                "SELECT $__timeGroup(ts, $__interval), count(*) FROM t WHERE $__timeFilter(ts) AND $__unixEpochFilter(epoch) AND env = '$env' GROUP BY 1",
+            ))
+            .query(RawQuery::new("SELECT mean(v) FROM m WHERE $timeFilter GROUP BY time($interval)"))
+            .query(RawQuery::new("SELECT * FROM t WHERE region = '$region'")),
+    );
+
+    assert_eq!(unknown_names(&dashboard), ["region"]);
+}
+
+#[test]
+fn chained_variables_may_reference_earlier_variables() {
+    let dashboard = Dashboard::new("Chain")
+        .variable(DataSourceVariable::new("datasource", "prometheus"))
+        .variable(
+            QueryVariable::new(
+                "namespace",
+                PrometheusQuery::new("label_values(up, namespace)"),
+            )
+            .datasource(prometheus("${datasource}")),
+        )
+        .variable(
+            QueryVariable::new(
+                "pod",
+                PrometheusQuery::new("label_values(up{namespace=~\"$namespace\"}, pod)"),
+            )
+            .datasource(prometheus("$datasource")),
+        );
+
+    dashboard.validate().unwrap();
+}
+
+#[test]
+fn chained_variables_may_not_reference_later_variables_or_themselves() {
+    let dashboard = Dashboard::new("Chain")
+        .variable(
+            QueryVariable::new(
+                "pod",
+                PrometheusQuery::new(
+                    "label_values(up{namespace=~\"$namespace\", pod=~\"$pod\"}, pod)",
+                ),
+            )
+            .datasource(prometheus("$datasource")),
+        )
+        .variable(QueryVariable::new(
+            "namespace",
+            PrometheusQuery::new("label_values(up, namespace)"),
+        ))
+        .variable(DataSourceVariable::new("datasource", "prometheus"));
+
+    let errors = dashboard.validate().unwrap_err();
+    let early =
+        |field: &'static str, name: &str| ValidationError::VariableReferencedBeforeDeclaration {
+            variable: "pod".to_owned(),
+            field,
+            name: name.to_owned(),
+        };
+    assert_eq!(
+        errors.errors(),
+        [
+            early("query expression", "namespace"),
+            early("query expression", "pod"),
+            early("datasource", "datasource"),
+        ]
+    );
+    assert_eq!(
+        errors.errors()[0].to_string(),
+        "variable \"pod\": query expression references \"namespace\", which is not declared before it; Grafana resolves variables in declaration order"
+    );
+}
+
+/// A query variable without its own datasource runs against the dashboard
+/// default, so that default must also resolve before the variable does.
+#[test]
+fn an_inherited_dashboard_datasource_must_resolve_before_the_variable() {
+    let dashboard = Dashboard::new("Inherited")
+        .datasource(prometheus("$datasource"))
+        .variable(QueryVariable::new(
+            "namespace",
+            PrometheusQuery::new("label_values(up, namespace)"),
+        ))
+        .variable(DataSourceVariable::new("datasource", "prometheus"))
+        .panel(Stat::new("Up").query(PrometheusQuery::new("up")));
+
+    let errors = dashboard.validate().unwrap_err();
+    assert_eq!(
+        errors.errors(),
+        [ValidationError::VariableReferencedBeforeDeclaration {
+            variable: "namespace".to_owned(),
+            field: "inherited datasource",
+            name: "datasource".to_owned(),
+        }]
+    );
+}
+
+/// An unknown name in the dashboard datasource is the dashboard's mistake.
+/// Variables inheriting it do not repeat the report.
+#[test]
+fn an_unknown_inherited_datasource_is_reported_once_at_the_dashboard() {
+    let dashboard = Dashboard::new("Inherited")
+        .datasource(prometheus("$nowhere"))
+        .variable(QueryVariable::new(
+            "a",
+            PrometheusQuery::new("label_values(up, a)"),
+        ))
+        .variable(QueryVariable::new(
+            "b",
+            PrometheusQuery::new("label_values(up, b)"),
+        ));
+
+    let errors = dashboard.validate().unwrap_err();
+    assert_eq!(
+        errors.errors(),
+        [ValidationError::UnknownVariableReference {
+            site: VariableReferenceSite::Dashboard,
+            field: "datasource",
+            name: "nowhere".to_owned(),
+        }]
+    );
+}
+
+/// Panels resolve after every variable, so declaration order is irrelevant
+/// to them.
+#[test]
+fn panels_may_reference_variables_declared_in_any_order() {
+    let dashboard = Dashboard::new("Order")
+        .panel(Stat::new("Up").query(PrometheusQuery::new("up{env=\"$env\"}")))
+        .variable(environment());
+
+    dashboard.validate().unwrap();
+}
+
+#[test]
+fn dollar_signs_that_are_not_references_are_ignored() {
+    let dashboard = Dashboard::new("False positives")
+        .variable(
+            QueryVariable::new("env", PrometheusQuery::new("label_values(up, env)"))
+                .regex("/^(prod|staging)$/"),
+        )
+        .variable(DataSourceVariable::new("source", "prometheus").regex("/^prometheus-$/"))
+        .panel(
+            Table::new("Hosts")
+                .query(PrometheusQuery::new(
+                    r#"label_replace(up{job=~"^(api|web)$"}, "host", "$1", "instance", "(.*):.*")"#,
+                ))
+                .query(PrometheusQuery::new(
+                    r#"label_replace(up, "pair", "${1}-${2}", "instance", "(.*):(.*)")"#,
+                ))
+                .query(PrometheusQuery::new("vector(1)").legend_format("costs $ 5"))
+                .transform(OrganizeFields::new().rename("Value", "$1 total")),
+        );
+
+    dashboard.validate().unwrap();
 }

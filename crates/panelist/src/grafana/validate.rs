@@ -21,15 +21,16 @@
 //  limitations under the License.
 //
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
-    Dashboard, DashboardItem, OrganizeFields, OverrideMatcher, Panel, Thresholds, Transformation,
-    ValidationError, ValidationErrors, Variable, transformation::TransformationFilter,
-    variable::VariableDiagnostic,
+    Dashboard, DashboardItem, OrganizeFields, OverrideMatcher, Panel, Query, Thresholds,
+    Transformation, ValidationError, ValidationErrors, Variable, VariableReferenceSite,
+    transformation::TransformationFilter, variable::VariableDiagnostic,
 };
 
 use super::query::effective_ref_ids;
+use super::references::{is_grafana_global, is_plugin_macro, variable_references};
 use super::transform::rename_sources;
 
 pub(crate) fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
@@ -98,7 +99,167 @@ pub(crate) fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
             DashboardItem::Panel(panel) => validate_panel(panel, &mut ids, &mut errors),
         }
     }
+    validate_variable_references(dashboard, &mut errors);
     ValidationErrors::from_vec(errors)
+}
+
+/// Checks that every template-variable reference in a string Grafana
+/// interpolates resolves to a declared variable or a Grafana built-in.
+///
+/// Only fields that carry references by design are scanned: query
+/// expressions, legend formats, datasource UIDs, link URLs, and query
+/// variable definitions. Variable `regex` options are left alone. Grafana
+/// does interpolate them, but a `$` in a regex is almost always an anchor.
+fn validate_variable_references(dashboard: &Dashboard, errors: &mut Vec<ValidationError>) {
+    // The first declaration of a name is the one Grafana resolves.
+    let mut declared: HashMap<&str, usize> = HashMap::new();
+    for (position, variable) in dashboard.variables.iter().enumerate() {
+        declared.entry(variable.name()).or_insert(position);
+    }
+
+    let mut references = References::new(&declared, VariableReferenceSite::Dashboard, None);
+    if let Some(datasource) = &dashboard.datasource {
+        references.check("datasource", datasource.uid(), Leeway::None, errors);
+    }
+    for link in &dashboard.links {
+        references.check("link URL", &link.url, Leeway::None, errors);
+    }
+
+    for (position, variable) in dashboard.variables.iter().enumerate() {
+        let Variable::Query(variable) = variable else {
+            continue;
+        };
+        let mut references = References::new(
+            &declared,
+            VariableReferenceSite::Variable(variable.name.clone()),
+            Some(position),
+        );
+        check_query(&mut references, &variable.query, errors);
+        if let Some(datasource) = &variable.datasource {
+            references.check("datasource", datasource.uid(), Leeway::None, errors);
+        } else if variable.query.options().datasource.is_none()
+            && let Some(datasource) = &dashboard.datasource
+        {
+            references.check(
+                "inherited datasource",
+                datasource.uid(),
+                Leeway::OrderOnly,
+                errors,
+            );
+        }
+    }
+
+    let panels = dashboard.items.iter().flat_map(|item| match item {
+        DashboardItem::Row(row) => row.panels.iter().collect::<Vec<_>>(),
+        DashboardItem::Panel(panel) => vec![panel.as_ref()],
+    });
+    for panel in panels {
+        let mut references = References::new(
+            &declared,
+            VariableReferenceSite::Panel(panel.title.clone()),
+            None,
+        );
+        if let Some(datasource) = &panel.datasource {
+            references.check("datasource", datasource.uid(), Leeway::None, errors);
+        }
+        for query in &panel.queries {
+            check_query(&mut references, query, errors);
+        }
+        for link in &panel.links {
+            references.check("link URL", &link.url, Leeway::None, errors);
+        }
+    }
+}
+
+fn check_query(references: &mut References<'_>, query: &Query, errors: &mut Vec<ValidationError>) {
+    let leeway = match query {
+        Query::Raw(_) => Leeway::PluginMacros,
+        Query::Prometheus(_) | Query::Loki(_) => Leeway::None,
+    };
+    references.check("query expression", query.expression(), leeway, errors);
+    let options = query.options();
+    if let Some(legend_format) = &options.legend_format {
+        references.check("legend format", legend_format, Leeway::None, errors);
+    }
+    if let Some(datasource) = &options.datasource {
+        references.check("query datasource", datasource.uid(), Leeway::None, errors);
+    }
+}
+
+/// Which unresolved names a field tolerates beyond Grafana's built-ins.
+#[derive(Clone, Copy)]
+enum Leeway {
+    /// Every name must be declared or built in.
+    None,
+    /// A raw query's unknown datasource plugin may define `__` macros.
+    PluginMacros,
+    /// Only ordering is checked. Used for the dashboard datasource a query
+    /// variable inherits, whose unknown names the dashboard already reports.
+    OrderOnly,
+}
+
+/// Resolves the references found at one site and reports each unresolved
+/// name once per field.
+struct References<'a> {
+    declared: &'a HashMap<&'a str, usize>,
+    site: VariableReferenceSite,
+    /// A query variable's own position. Only names declared before it
+    /// resolve, because Grafana resolves variables in order.
+    position: Option<usize>,
+    reported: HashSet<(&'static str, String)>,
+}
+
+impl<'a> References<'a> {
+    fn new(
+        declared: &'a HashMap<&'a str, usize>,
+        site: VariableReferenceSite,
+        position: Option<usize>,
+    ) -> Self {
+        Self {
+            declared,
+            site,
+            position,
+            reported: HashSet::new(),
+        }
+    }
+
+    fn check(
+        &mut self,
+        field: &'static str,
+        text: &str,
+        leeway: Leeway,
+        errors: &mut Vec<ValidationError>,
+    ) {
+        for name in variable_references(text) {
+            if is_grafana_global(name)
+                || (matches!(leeway, Leeway::PluginMacros) && is_plugin_macro(name))
+            {
+                continue;
+            }
+            let error = match (self.declared.get(name), self.position, &self.site) {
+                (Some(_), None, _) => continue,
+                (Some(declared), Some(position), _) if *declared < position => continue,
+                (Some(_), Some(_), VariableReferenceSite::Variable(variable)) => {
+                    ValidationError::VariableReferencedBeforeDeclaration {
+                        variable: variable.clone(),
+                        field,
+                        name: name.to_owned(),
+                    }
+                }
+                (None, _, _) if !matches!(leeway, Leeway::OrderOnly) => {
+                    ValidationError::UnknownVariableReference {
+                        site: self.site.clone(),
+                        field,
+                        name: name.to_owned(),
+                    }
+                }
+                _ => continue,
+            };
+            if self.reported.insert((field, name.to_owned())) {
+                errors.push(error);
+            }
+        }
+    }
 }
 
 pub(crate) fn validate_panel(

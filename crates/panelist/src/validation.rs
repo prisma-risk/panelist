@@ -21,7 +21,7 @@
 //  limitations under the License.
 //
 
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
 use thiserror::Error;
 
@@ -245,6 +245,59 @@ pub enum ValidationError {
         /// The underlying field both resolve to.
         field: String,
     },
+    /// A string Grafana interpolates references a template variable that is
+    /// neither declared on the dashboard nor one of Grafana's built-ins.
+    ///
+    /// Grafana leaves an unresolved reference in place, so a typo such as
+    /// `$enviroment` reaches the datasource verbatim and the panel quietly
+    /// shows no data.
+    #[error("{site}: {field} references unknown variable \"{name}\"")]
+    UnknownVariableReference {
+        /// Where the reference was found.
+        site: VariableReferenceSite,
+        /// The field holding the reference, such as `"query expression"`.
+        field: &'static str,
+        /// The unresolved variable name, without `$`, braces, or format.
+        name: String,
+    },
+    /// A query variable references a dashboard variable declared at or after
+    /// its own position.
+    ///
+    /// Grafana resolves variables in declaration order, so a chained
+    /// variable only sees the values of variables declared before it.
+    #[error(
+        "variable \"{variable}\": {field} references \"{name}\", which is not declared before it; Grafana resolves variables in declaration order"
+    )]
+    VariableReferencedBeforeDeclaration {
+        /// The referencing variable.
+        variable: String,
+        /// The field holding the reference, such as `"query expression"`.
+        field: &'static str,
+        /// The referenced variable, declared later or the variable itself.
+        name: String,
+    },
+}
+
+/// Where a template-variable reference was found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum VariableReferenceSite {
+    /// The dashboard itself: its default datasource or its links.
+    Dashboard,
+    /// A panel, named by its title.
+    Panel(String),
+    /// A dashboard variable, named by its name.
+    Variable(String),
+}
+
+impl fmt::Display for VariableReferenceSite {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Dashboard => formatter.write_str("dashboard"),
+            Self::Panel(title) => write!(formatter, "panel \"{title}\""),
+            Self::Variable(name) => write!(formatter, "variable \"{name}\""),
+        }
+    }
 }
 
 fn format_quoted(values: &[String]) -> String {
