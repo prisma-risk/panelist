@@ -21,24 +21,100 @@
 //  limitations under the License.
 //
 
+//! Grafana identifiers for Panelist's typed vocabulary.
+//!
+//! Unit IDs come from `packages/grafana-data/src/valueFormats/categories.ts` and color modes from `FieldColorModeId` in `packages/grafana-data/src/types/fieldColor.ts`, both at v13.0.2. Grafana stores an unknown unit or color mode unchanged and falls back silently at render time, so a typo here passes every round-trip check.
+
 use crate::{
-    BarGaugeDisplayMode, Color, LineInterpolation, Orientation, PanelKind, PointVisibility,
-    Reducer, StackingMode, StatColorMode, StatGraphMode, TextMode, TooltipMode, TooltipSort, Unit,
+    BarGaugeDisplayMode, Color, ContinuousPalette, Currency, LineInterpolation, Orientation,
+    PanelKind, PointVisibility, Reducer, StackingMode, StatColorMode, StatGraphMode, TextMode,
+    TooltipMode, TooltipSort, Unit,
 };
 
 pub(crate) fn unit(unit: &Unit) -> &str {
     match unit {
         Unit::None => "none",
-        Unit::Seconds => "s",
+        Unit::Nanoseconds => "ns",
+        // U+00B5 MICRO SIGN, as Grafana spells the ID, not U+03BC GREEK SMALL LETTER MU. They render alike and only one of them resolves.
+        Unit::Microseconds => "\u{b5}s",
         Unit::Milliseconds => "ms",
+        Unit::Seconds => "s",
+        Unit::Minutes => "m",
+        Unit::Hours => "h",
+        Unit::Days => "d",
+        Unit::DurationSeconds => "dtdurations",
+        Unit::DurationMilliseconds => "dtdurationms",
         Unit::Bytes => "bytes",
         Unit::BytesPerSecond => "Bps",
+        Unit::BitsPerSecond => "bps",
+        Unit::PacketsPerSecond => "pps",
         Unit::Percent => "percent",
         Unit::PercentUnit => "percentunit",
         Unit::RequestsPerSecond => "reqps",
         Unit::OperationsPerSecond => "ops",
+        Unit::ReadsPerSecond => "rps",
+        Unit::WritesPerSecond => "wps",
+        Unit::IoOperationsPerSecond => "iops",
+        Unit::EventsPerSecond => "eps",
         Unit::Short => "short",
+        Unit::Currency(value) => currency(*value),
         Unit::Custom(value) => value,
+    }
+}
+
+pub(crate) const fn currency(currency: Currency) -> &'static str {
+    match currency {
+        Currency::Usd => "currencyUSD",
+        Currency::Gbp => "currencyGBP",
+        Currency::Eur => "currencyEUR",
+        Currency::Jpy => "currencyJPY",
+        Currency::Rub => "currencyRUB",
+        Currency::Uah => "currencyUAH",
+        Currency::Brl => "currencyBRL",
+        Currency::Dkk => "currencyDKK",
+        Currency::Isk => "currencyISK",
+        Currency::Nok => "currencyNOK",
+        Currency::Sek => "currencySEK",
+        Currency::Czk => "currencyCZK",
+        Currency::Chf => "currencyCHF",
+        Currency::Pln => "currencyPLN",
+        Currency::Btc => "currencyBTC",
+        Currency::MilliBtc => "currencymBTC",
+        // U+03BC GREEK SMALL LETTER MU here, unlike the micro sign in `µs`. Grafana's own IDs disagree, and each must match byte for byte.
+        Currency::MicroBtc => "currency\u{3bc}BTC",
+        Currency::Zar => "currencyZAR",
+        Currency::Inr => "currencyINR",
+        Currency::Krw => "currencyKRW",
+        Currency::Idr => "currencyIDR",
+        Currency::Php => "currencyPHP",
+        Currency::Vnd => "currencyVND",
+        Currency::Try => "currencyTRY",
+        Currency::Myr => "currencyMYR",
+        Currency::Xpf => "currencyXPF",
+        Currency::Bgn => "currencyBGN",
+        Currency::Pyg => "currencyPYG",
+        Currency::Uyu => "currencyUYU",
+        Currency::Ils => "currencyILS",
+    }
+}
+
+pub(crate) const fn continuous_palette(palette: ContinuousPalette) -> &'static str {
+    match palette {
+        ContinuousPalette::GreenYellowRed => "continuous-GrYlRd",
+        ContinuousPalette::RedYellowGreen => "continuous-RdYlGr",
+        ContinuousPalette::BlueYellowRed => "continuous-BlYlRd",
+        ContinuousPalette::YellowRed => "continuous-YlRd",
+        ContinuousPalette::BluePurple => "continuous-BlPu",
+        ContinuousPalette::YellowBlue => "continuous-YlBl",
+        ContinuousPalette::Blues => "continuous-blues",
+        ContinuousPalette::Reds => "continuous-reds",
+        ContinuousPalette::Greens => "continuous-greens",
+        ContinuousPalette::Purples => "continuous-purples",
+        ContinuousPalette::Viridis => "continuous-viridis",
+        ContinuousPalette::Magma => "continuous-magma",
+        ContinuousPalette::Plasma => "continuous-plasma",
+        ContinuousPalette::Inferno => "continuous-inferno",
+        ContinuousPalette::Cividis => "continuous-cividis",
     }
 }
 

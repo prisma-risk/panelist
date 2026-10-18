@@ -45,10 +45,9 @@ fn main() -> panelist::Result<()> {
         )
         .unit(Unit::Seconds)
         .thresholds(
-            Thresholds::new()
-                .green(0.0)
-                .yellow(0.5)
-                .red(1.0),
+            Thresholds::absolute(Color::Green)
+                .step(0.5, Color::Yellow)
+                .step(1.0, Color::Red),
         )
         .legend_options(
             Legend::new()

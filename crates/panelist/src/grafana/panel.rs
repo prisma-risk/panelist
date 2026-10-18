@@ -142,6 +142,7 @@ pub(crate) fn normalize_panel(
             .collect(),
         field_config: Some(normalize_field_config(
             &panel.field_config,
+            &panel.queries,
             &panel.kind,
             &panel.kind_options,
         )),
