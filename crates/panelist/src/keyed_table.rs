@@ -25,7 +25,7 @@ use std::collections::HashSet;
 
 use crate::{
     Color, ColorScheme, FieldOverride, JoinByField, JoinMode, OrganizeFields, OverrideProperty,
-    Panel, PrometheusFormat, PrometheusQuery, Query, Reducer, TableCell, Thresholds,
+    Panel, PrometheusFormat, PrometheusQuery, Query, QueryType, Reducer, TableCell, Thresholds,
     TimeSeriesToTable, Transformation, Unit, ValidationError,
     grafana::effective_ref_ids,
     panel::{PanelBuilder, TableKind},
@@ -165,7 +165,7 @@ impl Column {
 ///         Column::new("p95", promql!("histogram_quantile(0.95, sum by (route, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))"))
 ///             .unit(Unit::Seconds)
 ///             .cell(TableCellType::ColoredBackground)
-///             .thresholds(Thresholds::new().green(0.0).yellow(0.3).red(1.0)),
+///             .thresholds(Thresholds::absolute(Color::Green).step(0.3, Color::Yellow).step(1.0, Color::Red)),
 ///     )
 ///     .column(
 ///         Column::trend("Trend", promql!("sum by (route) (rate(http_requests_total[$__rate_interval]))"), Reducer::Last)
@@ -390,12 +390,14 @@ impl From<KeyedTable> for Panel {
 
 /// One value per key: an instant query in table format.
 fn instant_table_query(query: PrometheusQuery) -> PrometheusQuery {
-    query.format(PrometheusFormat::Table).instant(true)
+    query.format(PrometheusFormat::Table).instant()
 }
 
-/// One series per key: a range query in time-series format. An explicit `range(true)` is kept; anything that would make it instant is dropped.
+/// One series per key: a range query in time-series format. An explicit range evaluation is kept, the range half of `QueryType::Both` included; anything that would make it instant is dropped.
 fn range_series_query(mut query: PrometheusQuery) -> PrometheusQuery {
-    query.options.instant = false;
-    query.options.range = query.options.range.filter(|range| *range);
+    query.options.query_type = match query.options.query_type {
+        Some(QueryType::Range | QueryType::Both) => Some(QueryType::Range),
+        Some(QueryType::Instant) | None => None,
+    };
     query.format(PrometheusFormat::TimeSeries)
 }

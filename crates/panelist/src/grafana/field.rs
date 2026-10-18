@@ -33,14 +33,17 @@ use crate::{
 };
 
 use super::link::data_links_value;
-
-use super::vocabulary::{color, line_interpolation, point_visibility, stacking_mode, unit};
+use super::vocabulary::{
+    color, continuous_palette, line_interpolation, point_visibility, stacking_mode, unit,
+};
 use super::wire::{
     GrafanaFieldConfig, GrafanaFieldOverride, GrafanaMatcher, GrafanaOverrideProperty,
 };
 
+/// Lowers a panel's field config. `overrides` is the panel's resolved override list, which already places the queries' own field properties ahead of the panel's (see `super::query::query_field_overrides`).
 pub(crate) fn normalize_field_config(
     config: &FieldConfig,
+    overrides: &[FieldOverride],
     kind: &PanelKind,
     kind_options: &PanelOptions,
 ) -> GrafanaFieldConfig {
@@ -78,7 +81,7 @@ pub(crate) fn normalize_field_config(
 
     GrafanaFieldConfig {
         defaults,
-        overrides: config.overrides.iter().map(normalize_override).collect(),
+        overrides: overrides.iter().map(normalize_override).collect(),
     }
 }
 
@@ -347,15 +350,19 @@ pub(crate) fn stacking_value(stacking: &Stacking) -> Value {
     json!({"mode": stacking_mode(stacking.mode), "group": stacking.group})
 }
 
+// `fixed` and `shades` read their color from `fixedColor` (`getFixedColor` and `getShadedColor` in `packages/grafana-data/src/field/fieldColor.ts`); every other mode takes none.
 pub(crate) fn color_scheme_value(scheme: &ColorScheme) -> Value {
     match scheme {
         ColorScheme::Thresholds => json!({"mode": "thresholds"}),
         ColorScheme::ClassicPalette => json!({"mode": "palette-classic"}),
+        ColorScheme::ClassicPaletteByName => json!({"mode": "palette-classic-by-name"}),
         ColorScheme::Fixed(value) => json!({"mode": "fixed", "fixedColor": color(value)}),
-        ColorScheme::Continuous(scheme) => json!({"mode": scheme}),
+        ColorScheme::Shades(value) => json!({"mode": "shades", "fixedColor": color(value)}),
+        ColorScheme::Continuous(palette) => json!({"mode": continuous_palette(*palette)}),
     }
 }
 
+/// Grafana's step list: the base step, with a `null` value, then each authored step.
 pub(crate) fn thresholds_value(thresholds: &Thresholds) -> Value {
     let resolved = ResolvedThresholds::from(thresholds);
     json!({

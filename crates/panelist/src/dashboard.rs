@@ -512,7 +512,7 @@ impl Dashboard {
     ///     .panel(
     ///         Stat::new("Requests")
     ///             .query(promql!("sum(rate(requests_total[$__rate_interval]))"))
-    ///             .thresholds(Thresholds::new().step(Color::Green, None)),
+    ///             .thresholds(Thresholds::absolute(Color::Green)),
     ///     )
     ///     .row(
     ///         Row::new("Details")

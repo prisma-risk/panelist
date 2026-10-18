@@ -28,13 +28,10 @@
 //! The view pairs each resolved fact with the authored typed value it belongs to. A unit is still a [`Unit`] and a color scheme is still a [`ColorScheme`], not the string Grafana stores. The internal wire structs stay private, as `docs/schema-compatibility.md` requires.
 
 use crate::{
-    Color, ColorScheme, Dashboard, DataSource, FieldConfig, FieldOverride, GridPos, Panel,
-    PanelKind, PrometheusFormat, Query, QueryEditorMode, Row, ThresholdMode, Thresholds,
-    Transformation, Unit,
+    Color, ColorScheme, Dashboard, DataSource, FieldConfig, FieldOverride, GridPos,
+    OverrideProperty, Panel, PanelKind, PrometheusFormat, Query, QueryEditorMode, QueryType, Row,
+    ThresholdMode, Thresholds, Transformation, Unit,
 };
-
-/// The color Grafana gives a synthesized base threshold step when no step is authored at all.
-static DEFAULT_BASE_COLOR: Color = Color::Green;
 
 /// A validated dashboard with every panel ID, query reference ID, grid position, and inherited datasource resolved.
 ///
@@ -185,6 +182,8 @@ pub struct ResolvedPanel<'a> {
     pub(crate) row: Option<PanelRow<'a>>,
     pub(crate) datasource: Option<&'a DataSource>,
     pub(crate) queries: Vec<ResolvedQuery<'a>>,
+    /// Query-derived overrides at their resolved reference IDs, then the panel's own, in emission order.
+    pub(crate) overrides: Vec<FieldOverride>,
 }
 
 impl<'a> ResolvedPanel<'a> {
@@ -250,11 +249,12 @@ impl<'a> ResolvedPanel<'a> {
         &self.queries
     }
 
-    /// Returns the panel's field defaults and overrides.
+    /// Returns the panel's field defaults and resolved overrides.
     #[must_use]
-    pub fn field_config(&self) -> ResolvedFieldConfig<'a> {
+    pub fn field_config(&self) -> ResolvedFieldConfig<'_> {
         ResolvedFieldConfig {
             config: &self.panel.field_config,
+            overrides: &self.overrides,
         }
     }
 
@@ -289,9 +289,9 @@ impl<'a> ResolvedQuery<'a> {
         &self.ref_id
     }
 
-    /// Returns the query expression.
+    /// Returns the query expression, or `None` for a [`crate::RawQuery`] built without one.
     #[must_use]
-    pub fn expression(&self) -> &'a str {
+    pub fn expression(&self) -> Option<&'a str> {
         self.query.expression()
     }
 
@@ -330,10 +330,12 @@ impl<'a> ResolvedQuery<'a> {
         }
     }
 
-    /// Returns whether the query is an instant query.
+    /// Returns the evaluation the query asks for, or `None` when it keeps the datasource's default.
+    ///
+    /// Prometheus and Loki default to a range query, but an unset type is not the same as [`QueryType::Range`]: only an explicit type is pinned in the emitted target.
     #[must_use]
-    pub fn instant(&self) -> bool {
-        self.query.options().instant
+    pub fn query_type(&self) -> Option<QueryType> {
+        self.query.options().query_type
     }
 
     /// Returns whether the query is hidden from the visualization.
@@ -347,12 +349,21 @@ impl<'a> ResolvedQuery<'a> {
     pub fn editor_mode(&self) -> Option<QueryEditorMode> {
         self.query.options().editor_mode
     }
+
+    /// Returns the field properties set on the query itself, in authored order.
+    ///
+    /// They reach Grafana as one override matching this query's [`ResolvedQuery::ref_id`], which [`ResolvedFieldConfig::overrides`] includes.
+    #[must_use]
+    pub fn field_properties(&self) -> &'a [OverrideProperty] {
+        &self.query.options().field_properties
+    }
 }
 
-/// A panel's field defaults and overrides.
+/// A panel's field defaults and resolved overrides.
 #[derive(Debug, Clone, Copy)]
 pub struct ResolvedFieldConfig<'a> {
     config: &'a FieldConfig,
+    overrides: &'a [FieldOverride],
 }
 
 impl<'a> ResolvedFieldConfig<'a> {
@@ -405,16 +416,18 @@ impl<'a> ResolvedFieldConfig<'a> {
             .map(ResolvedThresholds::from)
     }
 
-    /// Returns the field overrides in authored order.
+    /// Returns the field overrides in the order Grafana applies them, where a later one wins.
+    ///
+    /// Field properties set on a query come first, each as an [`crate::OverrideMatcher::QueryRefId`] override at the query's resolved reference ID. The panel's own overrides follow in authored order.
     #[must_use]
     pub fn overrides(&self) -> &'a [FieldOverride] {
-        &self.config.overrides
+        self.overrides
     }
 }
 
-/// Thresholds as Grafana receives them, with the base step made explicit.
+/// Thresholds as Grafana receives them: a base step with no value, then each authored step.
 ///
-/// Grafana requires the first step to be a base step with no value. When the authored steps start with a valued step, serialization adds a base step in that step's color; when no steps are authored, it adds a green one. [`ResolvedThresholds::steps`] includes that base step. Thresholds inside an [`crate::OverrideProperty::Thresholds`] resolve the same way through `ResolvedThresholds::from`.
+/// Thresholds inside an [`crate::OverrideProperty::Thresholds`] read the same way through `ResolvedThresholds::from`.
 #[derive(Debug, Clone, Copy)]
 pub struct ResolvedThresholds<'a> {
     thresholds: &'a Thresholds,
@@ -435,19 +448,15 @@ impl<'a> ResolvedThresholds<'a> {
 
     /// Iterates over the emitted steps, base step first.
     pub fn steps(&self) -> impl Iterator<Item = ResolvedThresholdStep<'a>> + use<'a> {
-        let steps = self.thresholds.steps.as_slice();
-        let base = match steps.first() {
-            Some(first) if first.value.is_none() => None,
-            first => Some(ResolvedThresholdStep {
-                color: first.map_or(&DEFAULT_BASE_COLOR, |step| &step.color),
-                value: None,
-            }),
-        };
-        base.into_iter()
-            .chain(steps.iter().map(|step| ResolvedThresholdStep {
-                color: &step.color,
-                value: step.value,
-            }))
+        let thresholds = self.thresholds;
+        std::iter::once(ResolvedThresholdStep {
+            color: &thresholds.base,
+            value: None,
+        })
+        .chain(thresholds.steps.iter().map(|step| ResolvedThresholdStep {
+            color: &step.color,
+            value: Some(step.value),
+        }))
     }
 }
 

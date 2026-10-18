@@ -79,9 +79,9 @@ pub use dashboard::{
 };
 pub use datasource::{DataSource, loki, prometheus};
 pub use field::{
-    Color, ColorScheme, FieldConfig, FieldOverride, Legend, LegendMode, LegendPlacement,
-    OverrideMatcher, OverrideProperty, SpecialValue, ThresholdMode, ThresholdStep, Thresholds,
-    Unit, ValueMapping,
+    Color, ColorScheme, ContinuousPalette, Currency, FieldConfig, FieldOverride, Legend,
+    LegendMode, LegendPlacement, OverrideMatcher, OverrideProperty, SpecialValue, ThresholdMode,
+    Thresholds, Unit, ValueMapping,
 };
 pub use heatmap::{HeatmapColorMode, HeatmapColorScheme};
 pub use keyed_table::{Column, KeyedTable};
@@ -91,7 +91,8 @@ pub use panel::{
     Repeat, Stat, Table, Text, TextMode, Timeseries, VerticalRepeat,
 };
 pub use query::{
-    LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery,
+    LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, QueryType,
+    RawQuery,
 };
 pub use render::DashboardSet;
 pub use resolved::{
@@ -105,7 +106,7 @@ pub use table::{
 pub use target::GrafanaTarget;
 pub use transformation::{
     JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, OrganizeFields, RawTransformation,
-    SortBy, TimeSeriesToTable, Transformation,
+    RenameByRegex, SortBy, TimeSeriesToTable, Transformation,
 };
 pub use validation::{Error, Result, ValidationError, ValidationErrors, VariableReferenceSite};
 pub use variable::{
@@ -128,19 +129,19 @@ pub mod prelude {
     pub use crate::{
         Annotation, AxisPlacement, BarGauge, BarGaugeDisplayMode, BuiltInAnnotation,
         CellBackgroundMode, CellValueDisplay, Color, ColorScheme, ColoredBackgroundCell, Column,
-        ConstantVariable, CustomVariable, Dashboard, DashboardCursorSync, DashboardLink, DataLink,
-        DataLinkVariable, DataSource, DataSourceVariable, FieldConfig, FieldOverride, Gauge,
-        GaugeCell, GrafanaTarget, GridPos, Heatmap, HeatmapColorMode, HeatmapColorScheme,
-        JoinByField, JoinMode, KeyedTable, LabelsToFields, LabelsToFieldsMode, Legend, LegendMode,
-        LegendPlacement, LineInterpolation, LokiQuery, OrganizeFields, Orientation,
-        OverrideMatcher, OverrideProperty, Panel, PanelIds, PanelKind, PointVisibility,
-        PrometheusAnnotation, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode,
-        QueryVariable, RawAnnotation, RawPanel, RawQuery, RawTransformation, ReduceOptions,
-        Reducer, Repeat, Row, SortBy, SortDirection, SparklineCell, SpecialValue, Stacking,
-        StackingMode, Stat, StatColorMode, StatGraphMode, Table, TableCell, TableCellType, Text,
-        TextMode, ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable, Timeseries, Tooltip,
-        TooltipMode, TooltipSort, Transformation, Unit, ValueMapping, Variable, VariableBuilder,
-        VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus,
-        promql,
+        ConstantVariable, ContinuousPalette, Currency, CustomVariable, Dashboard,
+        DashboardCursorSync, DashboardLink, DataLink, DataLinkVariable, DataSource,
+        DataSourceVariable, FieldConfig, FieldOverride, Gauge, GaugeCell, GrafanaTarget, GridPos,
+        Heatmap, HeatmapColorMode, HeatmapColorScheme, JoinByField, JoinMode, KeyedTable,
+        LabelsToFields, LabelsToFieldsMode, Legend, LegendMode, LegendPlacement, LineInterpolation,
+        LokiQuery, OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel, PanelIds,
+        PanelKind, PointVisibility, PrometheusAnnotation, PrometheusFormat, PrometheusQuery, Query,
+        QueryEditorMode, QueryType, QueryVariable, RawAnnotation, RawPanel, RawQuery,
+        RawTransformation, ReduceOptions, Reducer, RenameByRegex, Repeat, Row, SortBy,
+        SortDirection, SparklineCell, SpecialValue, Stacking, StackingMode, Stat, StatColorMode,
+        StatGraphMode, Table, TableCell, TableCellType, Text, TextMode, ThresholdMode, Thresholds,
+        TimeRange, TimeSeriesToTable, Timeseries, Tooltip, TooltipMode, TooltipSort,
+        Transformation, Unit, ValueMapping, Variable, VariableBuilder, VariableRefresh,
+        VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus, promql,
     };
 }

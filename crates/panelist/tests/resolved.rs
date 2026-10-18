@@ -69,7 +69,7 @@ fn mixed_dashboard() -> Dashboard {
         .panel(
             Stat::new("Top stat")
                 .query(PrometheusQuery::new("up"))
-                .thresholds(Thresholds::new().red(80.0)),
+                .thresholds(Thresholds::absolute(Color::Green).step(80.0, Color::Red)),
         )
         .panel(
             Timeseries::new("Top series")
@@ -214,7 +214,7 @@ fn assert_view_matches_json(dashboard: &Dashboard) {
         );
         for (query, target) in panel.queries().iter().zip(&targets) {
             assert_eq!(target["refId"], query.ref_id());
-            assert_eq!(target["expr"], query.expression());
+            assert_eq!(target["expr"].as_str(), query.expression());
             assert_eq!(
                 target["datasource"]["uid"].as_str(),
                 query.datasource().map(DataSource::uid)
@@ -245,8 +245,19 @@ fn assert_view_matches_json(dashboard: &Dashboard) {
 
         let overrides = json["fieldConfig"]["overrides"]
             .as_array()
-            .map_or(0, Vec::len);
-        assert_eq!(overrides, panel.field_config().overrides().len());
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(overrides.len(), panel.field_config().overrides().len());
+        for (resolved, json) in panel.field_config().overrides().iter().zip(&overrides) {
+            assert_eq!(
+                json["properties"].as_array().map_or(0, Vec::len),
+                resolved.properties().len()
+            );
+            if let OverrideMatcher::QueryRefId(ref_id) = resolved.matcher() {
+                assert_eq!(json["matcher"]["id"], "byFrameRefID");
+                assert_eq!(json["matcher"]["options"], ref_id.as_str());
+            }
+        }
     }
 
     // Every emitted panel object, nested or not, is accounted for by the view.
@@ -291,7 +302,7 @@ fn keyed_tables_are_resolved_like_any_other_table() {
                                 "sum by (route) (rate(http_requests_total{status=~\"5..\"}[$__rate_interval]))"
                             ),
                         )
-                        .thresholds(Thresholds::new().green(0.0).red(1.0)),
+                        .thresholds(Thresholds::absolute(Color::Green).step(1.0, Color::Red)),
                     ),
             ),
         );
@@ -462,29 +473,23 @@ fn query_properties_are_typed() {
 }
 
 #[test]
-fn thresholds_include_the_base_step_grafana_receives() {
+fn thresholds_start_with_their_base_step() {
     let dashboard = Dashboard::new("Thresholds")
         .panel(
-            Stat::new("Empty")
+            Stat::new("Base only")
                 .query(PrometheusQuery::new("a"))
-                .thresholds(Thresholds::new()),
+                .thresholds(Thresholds::absolute(Color::Green)),
         )
         .panel(
-            Stat::new("Valued first")
+            Stat::new("Stepped")
                 .query(PrometheusQuery::new("b"))
-                .thresholds(Thresholds::new().red(80.0)),
-        )
-        .panel(
-            Stat::new("Explicit base")
-                .query(PrometheusQuery::new("c"))
                 .thresholds(
-                    Thresholds::new()
-                        .mode(ThresholdMode::Percentage)
-                        .step(Color::Blue, None)
-                        .yellow(50.0),
+                    Thresholds::percentage(Color::Blue)
+                        .step(50.0, Color::Yellow)
+                        .step(80.0, Color::Red),
                 ),
         )
-        .panel(Stat::new("Unset").query(PrometheusQuery::new("d")));
+        .panel(Stat::new("Unset").query(PrometheusQuery::new("c")));
     let resolved = resolve(&dashboard);
 
     let steps = |title: &str| -> Vec<(Color, Option<f64>)> {
@@ -500,14 +505,14 @@ fn thresholds_include_the_base_step_grafana_receives() {
             .unwrap_or_default()
     };
 
-    assert_eq!(steps("Empty"), [(Color::Green, None)]);
+    assert_eq!(steps("Base only"), [(Color::Green, None)]);
     assert_eq!(
-        steps("Valued first"),
-        [(Color::Red, None), (Color::Red, Some(80.0))]
-    );
-    assert_eq!(
-        steps("Explicit base"),
-        [(Color::Blue, None), (Color::Yellow, Some(50.0))]
+        steps("Stepped"),
+        [
+            (Color::Blue, None),
+            (Color::Yellow, Some(50.0)),
+            (Color::Red, Some(80.0)),
+        ]
     );
     assert!(
         panel(&resolved, "Unset")
@@ -516,11 +521,93 @@ fn thresholds_include_the_base_step_grafana_receives() {
             .is_none()
     );
     assert_eq!(
-        panel(&resolved, "Explicit base")
+        panel(&resolved, "Stepped")
             .field_config()
             .thresholds()
             .map(|thresholds| thresholds.mode()),
         Some(ThresholdMode::Percentage)
+    );
+    assert_view_matches_json(&dashboard);
+}
+
+#[test]
+fn query_field_properties_resolve_into_overrides_at_their_ref_ids() {
+    let dashboard = Dashboard::new("Per query")
+        .datasource(prometheus("prometheus-main"))
+        .panel(
+            Timeseries::new("Latency")
+                .query(
+                    PrometheusQuery::new("histogram_quantile(0.99, rate(latency_bucket[5m]))")
+                        .unit(Unit::Seconds)
+                        .instant(),
+                )
+                .query(PrometheusQuery::new("rate(requests_total[5m])"))
+                .query(
+                    PrometheusQuery::new("rate(errors_total[5m])")
+                        .ref_id("ERR")
+                        .query_type(QueryType::Range)
+                        .color(Color::Red),
+                )
+                .override_field(FieldOverride::by_query("ERR").decimals(2)),
+        );
+    assert_view_matches_json(&dashboard);
+
+    let resolved = resolve(&dashboard);
+    let latency = panel(&resolved, "Latency");
+    let types: Vec<_> = latency
+        .queries()
+        .iter()
+        .map(|query| query.query_type())
+        .collect();
+    assert_eq!(
+        types,
+        [Some(QueryType::Instant), None, Some(QueryType::Range)]
+    );
+    assert_eq!(
+        latency.queries()[0].field_properties(),
+        [OverrideProperty::Unit(Unit::Seconds)]
+    );
+
+    // Query properties come first, at each query's resolved ref ID, then the panel's own overrides.
+    let matchers: Vec<_> = latency
+        .field_config()
+        .overrides()
+        .iter()
+        .map(|item| item.matcher().clone())
+        .collect();
+    assert_eq!(
+        matchers,
+        [
+            OverrideMatcher::QueryRefId("A".into()),
+            OverrideMatcher::QueryRefId("ERR".into()),
+            OverrideMatcher::QueryRefId("ERR".into()),
+        ]
+    );
+    assert_eq!(
+        latency.field_config().overrides()[2].properties(),
+        [OverrideProperty::Decimals(2)]
+    );
+}
+
+#[test]
+fn raw_queries_without_an_expression_resolve_to_none() {
+    let dashboard = Dashboard::new("Raw").panel(
+        RawPanel::new("table", "Rows")
+            .datasource(DataSource::new(
+                "grafana-postgresql-datasource",
+                "postgres-main",
+            ))
+            .query(RawQuery::new().extra("rawSql", serde_json::json!("SELECT 1"))),
+    );
+    assert_view_matches_json(&dashboard);
+
+    let resolved = resolve(&dashboard);
+    let query = &panel(&resolved, "Rows").queries()[0];
+    assert_eq!(query.expression(), None);
+    assert_eq!(query.format(), None);
+    assert_eq!(
+        query.datasource().map(DataSource::kind),
+        Some("grafana-postgresql-datasource")
     );
 }
 
@@ -533,14 +620,15 @@ fn field_defaults_and_overrides_are_typed() {
             .min(0.0)
             .decimals(2)
             .display_name("${__field.labels.pod}")
-            .color(ColorScheme::Continuous("palette-classic-by-name".into()))
+            .color(ColorScheme::ClassicPaletteByName)
             .override_field(
                 FieldOverride::by_query("P99")
                     .color(Color::Red)
                     .unit(Unit::Milliseconds),
             )
             .override_field(
-                FieldOverride::by_name("errors").thresholds(Thresholds::new().red(1.0)),
+                FieldOverride::by_name("errors")
+                    .thresholds(Thresholds::absolute(Color::Green).step(1.0, Color::Red)),
             ),
     );
     let resolved = resolve(&dashboard);
@@ -551,10 +639,7 @@ fn field_defaults_and_overrides_are_typed() {
     assert_eq!(fields.max(), None);
     assert_eq!(fields.decimals(), Some(2));
     assert_eq!(fields.display_name(), Some("${__field.labels.pod}"));
-    assert_eq!(
-        fields.color(),
-        Some(&ColorScheme::Continuous("palette-classic-by-name".into()))
-    );
+    assert_eq!(fields.color(), Some(&ColorScheme::ClassicPaletteByName));
 
     let [by_query, by_name] = fields.overrides() else {
         panic!("expected two overrides");

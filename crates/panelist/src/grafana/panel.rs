@@ -133,6 +133,7 @@ pub(crate) fn normalize_panel(resolved: &ResolvedPanel<'_>) -> GrafanaPanel {
             .collect(),
         field_config: Some(normalize_field_config(
             &panel.field_config,
+            resolved.field_config().overrides(),
             &panel.kind,
             &panel.kind_options,
         )),

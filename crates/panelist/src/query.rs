@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::DataSource;
+use crate::{Color, ColorScheme, DataSource, OverrideProperty, Thresholds, Unit};
 
 /// Datasource-query editor shown by Grafana.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,17 +45,30 @@ impl QueryEditorMode {
     }
 }
 
+/// Which evaluation a query asks its datasource for.
+///
+/// A query that sets none keeps the datasource's own default, which for Prometheus and Loki is a range query. Setting [`QueryType::Range`] explicitly is not the same as leaving it unset: it pins the choice in the emitted target, so a later change to the datasource default does not move it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryType {
+    /// One value per step across the dashboard time range. The shape time series panels draw.
+    Range,
+    /// One value per series at the end of the time range. The shape stat, gauge, bar gauge and table panels usually want.
+    Instant,
+    /// Both a range and an instant evaluation in one target. Prometheus only: Loki has no combined mode, so validation rejects it on a [`LokiQuery`].
+    Both,
+}
+
 /// Properties shared by datasource queries.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct QueryOptions {
     pub(crate) ref_id: Option<String>,
     pub(crate) legend_format: Option<String>,
-    pub(crate) instant: bool,
-    pub(crate) range: Option<bool>,
+    pub(crate) query_type: Option<QueryType>,
     pub(crate) datasource: Option<DataSource>,
     pub(crate) hidden: bool,
     pub(crate) interval: Option<String>,
     pub(crate) editor_mode: Option<QueryEditorMode>,
+    pub(crate) field_properties: Vec<OverrideProperty>,
 }
 
 macro_rules! impl_query_builder {
@@ -80,21 +93,21 @@ macro_rules! impl_query_builder {
                 self
             }
 
-            /// Requests an instant query rather than a range query.
+            /// Selects a range, instant, or combined evaluation.
+            ///
+            /// Leave it unset to keep the datasource's default. See [`QueryType`].
             #[must_use]
-            pub fn instant(mut self, instant: bool) -> Self {
-                self.options.instant = instant;
-                if instant {
-                    self.options.range = Some(false);
-                }
+            pub fn query_type(mut self, query_type: QueryType) -> Self {
+                self.options.query_type = Some(query_type);
                 self
             }
 
-            /// Explicitly enables or disables range-query behavior.
+            /// Requests an instant query: shorthand for `.query_type(QueryType::Instant)`.
+            ///
+            /// Instant is the one non-default evaluation most dashboards reach for, on every stat, gauge, bar gauge and table that shows a current value, so it gets a name of its own. The rarer explicit range and combined evaluations go through [`Self::query_type`].
             #[must_use]
-            pub fn range(mut self, range: bool) -> Self {
-                self.options.range = Some(range);
-                self
+            pub fn instant(self) -> Self {
+                self.query_type(QueryType::Instant)
             }
 
             /// Overrides the panel datasource for this query.
@@ -123,6 +136,49 @@ macro_rules! impl_query_builder {
             pub fn editor_mode(mut self, editor_mode: QueryEditorMode) -> Self {
                 self.options.editor_mode = Some(editor_mode);
                 self
+            }
+
+            /// Applies a field property to every field this query returns.
+            ///
+            /// Serialization turns a query's properties into one `byFrameRefID` field override on the reference ID the query resolves to, so the query needs no explicit [`Self::ref_id`] for it. Query overrides come before the panel's own [`crate::FieldOverride`]s, in query order, and Grafana lets a later override win. So a panel-level override, for example one [`crate::FieldOverride::by_name`] series, still refines what the query set.
+            ///
+            /// A variable's query renders no fields, so properties set on it are not emitted.
+            #[must_use]
+            pub fn field_property(mut self, property: OverrideProperty) -> Self {
+                self.options.field_properties.push(property);
+                self
+            }
+
+            /// Sets the unit of every field this query returns. See [`Self::field_property`].
+            #[must_use]
+            pub fn unit(self, unit: Unit) -> Self {
+                self.field_property(OverrideProperty::Unit(unit))
+            }
+
+            /// Gives every field this query returns one fixed color. See [`Self::field_property`].
+            #[must_use]
+            pub fn color(self, color: Color) -> Self {
+                self.field_property(OverrideProperty::Color(ColorScheme::Fixed(color)))
+            }
+
+            /// Sets the display name of every field this query returns. See [`Self::field_property`].
+            ///
+            /// Unlike [`Self::legend_format`], which the datasource applies per series, this is a Grafana field property and may use field-config templates such as `${__field.labels.route}`.
+            #[must_use]
+            pub fn display_name(self, display_name: impl Into<String>) -> Self {
+                self.field_property(OverrideProperty::DisplayName(display_name.into()))
+            }
+
+            /// Sets the displayed decimal count of every field this query returns. See [`Self::field_property`].
+            #[must_use]
+            pub fn decimals(self, decimals: u8) -> Self {
+                self.field_property(OverrideProperty::Decimals(decimals))
+            }
+
+            /// Sets thresholds for every field this query returns. See [`Self::field_property`].
+            #[must_use]
+            pub fn thresholds(self, thresholds: Thresholds) -> Self {
+                self.field_property(OverrideProperty::Thresholds(thresholds))
             }
         }
     };
@@ -194,22 +250,46 @@ impl LokiQuery {
 impl_query_builder!(LokiQuery);
 
 /// A generic datasource query for properties Panelist does not model yet.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// A raw target carries only the keys the author set, next to the `refId`, `hide` and datasource keys every target has. Expression-based datasources take [`Self::expression`]; others, such as CloudWatch, describe the whole query through [`Self::extra`]:
+///
+/// ```rust
+/// use panelist::prelude::*;
+/// use serde_json::json;
+///
+/// let query = RawQuery::new()
+///     .datasource(DataSource::new("cloudwatch", "cloudwatch-main"))
+///     .extra("namespace", json!("AWS/EC2"))
+///     .extra("metricName", json!("CPUUtilization"))
+///     .extra("statistic", json!("Average"));
+///
+/// let dashboard = Dashboard::new("Fleet").panel(Timeseries::new("CPU").query(query));
+/// let target = &serde_json::to_value(&dashboard)?["panels"][0]["targets"][0];
+/// assert!(target.get("expr").is_none());
+/// assert_eq!(target["metricName"], "CPUUtilization");
+/// # Ok::<(), serde_json::Error>(())
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct RawQuery {
-    pub(crate) expression: String,
+    pub(crate) expression: Option<String>,
     pub(crate) options: QueryOptions,
     pub(crate) extra: BTreeMap<String, Value>,
 }
 
 impl RawQuery {
-    /// Creates a raw query with an `expr` property.
+    /// Creates an empty raw query. Set [`Self::expression`], [`Self::extra`] keys, or both.
     #[must_use]
-    pub fn new(expression: impl Into<String>) -> Self {
-        Self {
-            expression: expression.into(),
-            options: QueryOptions::default(),
-            extra: BTreeMap::new(),
-        }
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the query expression, emitted as the target's `expr` key.
+    ///
+    /// `expr` is what Prometheus-compatible and Loki-compatible datasources read. A datasource that spells its query differently, such as `rawSql` or `query`, takes it through [`Self::extra`] instead.
+    #[must_use]
+    pub fn expression(mut self, expression: impl Into<String>) -> Self {
+        self.expression = Some(expression.into());
+        self
     }
 
     /// Adds or replaces an unsupported target property.
@@ -235,11 +315,12 @@ pub enum Query {
 }
 
 impl Query {
-    pub(crate) fn expression(&self) -> &str {
+    /// The query expression, or `None` for a raw query that sets none.
+    pub(crate) fn expression(&self) -> Option<&str> {
         match self {
-            Self::Prometheus(query) => &query.expression,
-            Self::Loki(query) => &query.expression,
-            Self::Raw(query) => &query.expression,
+            Self::Prometheus(query) => Some(&query.expression),
+            Self::Loki(query) => Some(&query.expression),
+            Self::Raw(query) => query.expression.as_deref(),
         }
     }
 

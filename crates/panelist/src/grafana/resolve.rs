@@ -27,7 +27,7 @@ use crate::{
 };
 
 use super::layout::{FlowLayout, assign_panel_ids};
-use super::query::resolve_queries;
+use super::query::{query_field_overrides, resolve_queries};
 use super::validate::validate;
 
 /// Validates `dashboard` and resolves every panel ID, grid position, row membership, query reference ID, and inherited datasource.
@@ -117,12 +117,16 @@ fn resolve_panel<'a>(
     default_datasource: Option<&'a DataSource>,
 ) -> ResolvedPanel<'a> {
     let datasource = panel.datasource.as_ref().or(default_datasource);
+    let queries = resolve_queries(panel, datasource);
+    let mut overrides = query_field_overrides(&queries);
+    overrides.extend(panel.field_config.overrides.iter().cloned());
     ResolvedPanel {
         panel,
         id,
         grid_pos,
         row,
         datasource,
-        queries: resolve_queries(panel, datasource),
+        queries,
+        overrides,
     }
 }
