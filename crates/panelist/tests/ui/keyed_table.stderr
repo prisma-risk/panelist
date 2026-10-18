@@ -1,0 +1,29 @@
+error: a `keyed_table` panel needs `by <label>` after its title, naming the label its rows are keyed on
+  --> tests/ui/keyed_table.rs:29:30
+   |
+29 |           keyed_table "No key" {
+   |  ______________________________^
+30 | |             column "RPS" => promql!("sum by (route) (rate(requests_total[5m]))");
+31 | |         }
+   | |_________^
+
+error: unknown key `key_nam` in a `keyed_table` panel; did you mean `key_name`?
+       keys accepted here: `query`, `legend_format`, `description`, `width`, `height`, `id`, `key`, `grid`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds`, `mapping`, `link`, `data_link`, `repeat`, `min_interval`, `max_data_points`, `time_from`, `time_shift`, `hide_time_override`, `override`, `transform`, `option`, `extra`, `sort_by`, `cell`, `key_name`, `column`, `trend`
+  --> tests/ui/keyed_table.rs:33:13
+   |
+33 |             key_nam: "Route";
+   |             ^^^^^^^
+
+error: unknown key `unti` in a column block; did you mean `unit`?
+       keys accepted here: `unit`, `min`, `max`, `decimals`, `color`, `thresholds`, `cell`, `property`
+  --> tests/ui/keyed_table.rs:35:17
+   |
+35 |                 unti: reqps;
+   |                 ^^^^
+
+error: unknown reducer `lst`; did you mean `last`?
+       accepted: `last`, `min`, `max`, `mean`, `total`; or any expression of type `Reducer`, such as `(lst)` for a variable
+  --> tests/ui/keyed_table.rs:37:19
+   |
+37 |             trend lst "Trend" => promql!("sum by (route) (rate(requests_total[5m]))");
+   |                   ^^^

@@ -1,0 +1,27 @@
+error: `fill_opacity` does not apply to a `stat` panel; it applies to `timeseries` panels
+       keys accepted here: `query`, `legend_format`, `description`, `width`, `height`, `id`, `key`, `grid`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds`, `mapping`, `link`, `data_link`, `repeat`, `min_interval`, `max_data_points`, `time_from`, `time_shift`, `hide_time_override`, `override`, `transform`, `option`, `extra`, `color_mode`, `graph_mode`, `wide_layout`, `orientation`, `reduce`
+  --> tests/ui/wrong_panel_kind.rs:30:13
+   |
+30 |             fill_opacity: 10.0;
+   |             ^^^^^^^^^^^^
+
+error: `legend` does not apply to a `stat` panel; it applies to `timeseries` panels
+       keys accepted here: `query`, `legend_format`, `description`, `width`, `height`, `id`, `key`, `grid`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds`, `mapping`, `link`, `data_link`, `repeat`, `min_interval`, `max_data_points`, `time_from`, `time_shift`, `hide_time_override`, `override`, `transform`, `option`, `extra`, `color_mode`, `graph_mode`, `wide_layout`, `orientation`, `reduce`
+  --> tests/ui/wrong_panel_kind.rs:31:13
+   |
+31 |             legend { mode: table; }
+   |             ^^^^^^
+
+error: `graph_mode` does not apply to a `table` panel; it applies to `stat` panels
+       keys accepted here: `query`, `legend_format`, `description`, `width`, `height`, `id`, `key`, `grid`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds`, `mapping`, `link`, `data_link`, `repeat`, `min_interval`, `max_data_points`, `time_from`, `time_shift`, `hide_time_override`, `override`, `transform`, `option`, `extra`, `sort_by`, `cell`
+  --> tests/ui/wrong_panel_kind.rs:35:13
+   |
+35 |             graph_mode: none;
+   |             ^^^^^^^^^^
+
+error: `column` does not apply to a `table` panel; it applies to `keyed_table` panels
+       keys accepted here: `query`, `legend_format`, `description`, `width`, `height`, `id`, `key`, `grid`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds`, `mapping`, `link`, `data_link`, `repeat`, `min_interval`, `max_data_points`, `time_from`, `time_shift`, `hide_time_override`, `override`, `transform`, `option`, `extra`, `sort_by`, `cell`
+  --> tests/ui/wrong_panel_kind.rs:36:13
+   |
+36 |             column "RPS" => promql!("sum by (route) (rate(requests_total[5m]))");
+   |             ^^^^^^

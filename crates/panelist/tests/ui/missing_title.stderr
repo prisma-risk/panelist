@@ -1,0 +1,5 @@
+error: a dashboard starts with `title: <expr>;`
+  --> tests/ui/missing_title.rs:28:9
+   |
+28 |         refresh: "1m";
+   |         ^^^^^^^

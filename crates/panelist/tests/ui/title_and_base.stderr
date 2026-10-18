@@ -1,0 +1,17 @@
+error: a `stat` panel started `from` a builder keeps that builder's title; remove this title, or drop `from …` and build the `stat` panel here
+  --> tests/ui/title_and_base.rs:29:14
+   |
+29 |         stat "Requests" from Stat::new("Requests") {
+   |              ^^^^^^^^^^
+
+error: a row started `from` a builder keeps that builder's title; remove this title, or drop `from …` and build the row here
+  --> tests/ui/title_and_base.rs:32:13
+   |
+32 |         row "Traffic" from Row::new("Traffic") {}
+   |             ^^^^^^^^^
+
+error: expected a `stat` panel builder expression after `from`
+  --> tests/ui/title_and_base.rs:33:19
+   |
+33 |         stat from {}
+   |                   ^^

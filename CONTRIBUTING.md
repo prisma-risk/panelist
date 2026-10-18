@@ -44,6 +44,7 @@ Useful focused commands:
 ```sh
 cargo test -p panelist --test model
 cargo test -p panelist --test macros
+cargo test -p panelist --test ui   # TRYBUILD=overwrite to refresh macro diagnostics
 cargo test -p panelist --test golden
 cargo run -p panelist --example full_dashboard
 make verify-grafana  # needs Docker: round-trips the goldens through a real Grafana
@@ -90,7 +91,7 @@ Do not edit `CHANGELOG.md` files by hand. The required changelog-ownership workf
 
 Release PR creation is manual. The publish phase runs automatically only when a push to `main` changes a release-plz-owned `CHANGELOG.md`; ordinary changes to `main` do not run it.
 
-Before changing publish metadata, run `make release-dry-run` to validate the crate archive exactly as crates.io will receive it. The publish job is the only job that receives `CARGO_REGISTRY_TOKEN`.
+`panelist` and `panelist-macros` release together at the same version, and `panelist` pins `panelist-macros` exactly. Before changing publish metadata, run `make release-dry-run` to validate both crate archives exactly as crates.io will receive them. The publish job is the only job that receives `CARGO_REGISTRY_TOKEN`.
 
 ## Developer Certificate of Origin
 

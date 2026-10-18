@@ -441,7 +441,7 @@ fn heatmap_dsl_covers_format_color_mode_and_axis_placement_variants() {
     // exercises `format: heatmap;`, `color_mode`'s default-masking-unsafe-if-
     // untested `scheme` case is skipped there entirely, `y_axis { unit: … }`
     // only exercises the bare-ident unit form, and `placement: left;` is the
-    // only one of `__panelist_axis_placement!`'s six arms it reaches. This
+    // only one of the six axis placements it reaches. This
     // test rounds out every remaining `format:`, `color_mode:`, y-axis-unit,
     // and axis-placement arm so each new rule has DSL-vs-builder coverage.
     let from_macro = dashboard! {
@@ -506,7 +506,7 @@ fn heatmap_dsl_covers_format_color_mode_and_axis_placement_variants() {
 
 #[test]
 fn stacking_dsl_matches_the_builder_model() {
-    // Covers all three `__panelist_stacking_mode!` arms. `none` is
+    // Covers all three stacking-mode words. `none` is
     // `StackingMode`'s `#[default]` variant, so it is paired here with an
     // explicit `.stacking(Stacking::new(StackingMode::None))` on the
     // builder side rather than an omitted call, so a dropped macro arm
@@ -1520,4 +1520,864 @@ fn every_unit_keyword_maps_to_its_typed_unit() {
             Dashboard::new("Units").panel(Stat::new("S").unit(unit))
         );
     }
+}
+
+/// Titles, names, link targets, mapping values, and organize arguments are
+/// ordinary expressions, so dashboards can be generated from data.
+#[test]
+fn expressions_are_accepted_wherever_a_literal_used_to_be_required() {
+    let service = "checkout";
+    let environments = vec!["production".to_owned(), "staging".to_owned()];
+    let order: Vec<String> = vec!["route".into(), "RPS".into()];
+    let runbook = format!("https://runbooks.example.com/{service}");
+
+    let from_macro = dashboard! {
+        title: format!("{service} overview");
+        link format!("{service} runbook") => runbook.clone();
+
+        variable format!("{service}_environment") {
+            values: environments.clone();
+            current environments[0].clone() => environments[0].clone();
+        }
+
+        row format!("{service} traffic") {
+            stat format!("{service} errors") {
+                query: promql!(format!("sum(rate({service}_errors_total[5m]))"));
+                mapping 0.to_string() => format!("{service} healthy");
+                link service.to_uppercase() => runbook.clone() { target_blank: true; }
+            }
+            table (format!("{service} routes")) {
+                transform organize {
+                    rename format!("Value #{}", "A") => service.to_owned() + " RPS";
+                    hide String::from("Time");
+                    order order.clone();
+                }
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("checkout overview")
+        .link(DashboardLink::new(
+            "checkout runbook",
+            "https://runbooks.example.com/checkout",
+        ))
+        .variable(
+            VariableBuilder::new("checkout_environment")
+                .values(["production", "staging"])
+                .current(VariableSelection::new("production", "production"))
+                .build(),
+        )
+        .row(
+            Row::new("checkout traffic")
+                .panel(
+                    Stat::new("checkout errors")
+                        .query(PrometheusQuery::new("sum(rate(checkout_errors_total[5m]))"))
+                        .mapping(ValueMapping::value("0").text("checkout healthy"))
+                        .link(
+                            DataLink::new("CHECKOUT", "https://runbooks.example.com/checkout")
+                                .target_blank(true),
+                        ),
+                )
+                .panel(
+                    Table::new("checkout routes").transform(
+                        OrganizeFields::new()
+                            .rename("Value #A", "checkout RPS")
+                            .hide("Time")
+                            .order(["route", "RPS"]),
+                    ),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+}
+
+/// Panels can be generated in Rust and dropped in one at a time with
+/// `panel:`, at dashboard and row level, alongside the `panels:` fragment
+/// form.
+#[test]
+fn single_panel_items_match_the_builder_model() {
+    let services = ["auth", "billing"];
+    let from_macro = dashboard! {
+        title: "Services";
+        panel: Stat::new("Top level").unit(Unit::Percent);
+
+        row "Per service" {
+            panel: Timeseries::new(format!("{} latency", services[0]));
+            panels: services[1..].iter().map(|service| Stat::new(format!("{service} errors")));
+            panel: Text::new("Notes").content("hello");
+        }
+    };
+
+    let from_builder = Dashboard::new("Services")
+        .panel(Stat::new("Top level").unit(Unit::Percent))
+        .row(
+            Row::new("Per service")
+                .panel(Timeseries::new("auth latency"))
+                .panel(Stat::new("billing errors"))
+                .panel(Text::new("Notes").content("hello")),
+        );
+
+    assert_eq!(from_macro, from_builder);
+}
+
+mod house {
+    use panelist::prelude::*;
+
+    /// A house-default stat that every team starts from.
+    pub fn stat(title: &str) -> Stat {
+        Stat::new(title)
+            .unit(Unit::Percent)
+            .graph_mode(StatGraphMode::None)
+            .width(4)
+    }
+
+    pub fn row(title: &str) -> Row {
+        Row::new(title).collapsed(true)
+    }
+}
+
+/// `from <builder>` continues an existing builder. The base keeps its own
+/// title and every key in the block applies on top of it.
+#[test]
+fn panels_and_rows_continue_from_a_base_builder() {
+    let from_macro = dashboard! {
+        title: "House style";
+
+        stat from house::stat("Availability") {
+            query: promql!("avg(up)");
+            width: 6;
+        }
+
+        row from house::row("Details") {
+            stat from house::stat("Saturation") {}
+            timeseries from Timeseries::new("Latency").unit(Unit::Seconds) {
+                fill_opacity: 10.0;
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("House style")
+        .panel(
+            house::stat("Availability")
+                .query(PrometheusQuery::new("avg(up)"))
+                .width(6),
+        )
+        .row(
+            house::row("Details")
+                .panel(house::stat("Saturation"))
+                .panel(
+                    Timeseries::new("Latency")
+                        .unit(Unit::Seconds)
+                        .fill_opacity(10.0),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+}
+
+/// A thresholds block names its base color in parentheses or with `base:`, then lists steps as `<value> => <color>` with any `Color`, including custom names, or as `<color word>: <value>`.
+#[test]
+fn thresholds_with_a_base_and_arbitrary_colors_match_the_builder_model() {
+    let warn = 70.5;
+    let from_macro = dashboard! {
+        title: "Thresholds";
+
+        gauge "Saturation" {
+            thresholds {
+                base: blue;
+                1 => green;
+                warn => orange;
+                90.0 => "dark-red";
+                99 => Color::custom("#ff00ff");
+            }
+        }
+
+        stat "Ratio" {
+            thresholds {
+                mode: percentage;
+                base: green;
+                80 => purple;
+            }
+        }
+
+        bar_gauge "Mixed steps" {
+            thresholds(red) {
+                yellow: 50.0;
+                95 => "dark-green";
+            }
+        }
+
+        table "Cells" {
+            override field("Errors") {
+                thresholds { base: "transparent"; 5 => red; }
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Thresholds")
+        .panel(
+            Gauge::new("Saturation").thresholds(
+                Thresholds::absolute(Color::Blue)
+                    .step(1.0, Color::Green)
+                    .step(70.5, Color::Orange)
+                    .step(90.0, Color::custom("dark-red"))
+                    .step(99.0, Color::custom("#ff00ff")),
+            ),
+        )
+        .panel(Stat::new("Ratio").thresholds(
+            Thresholds::new(ThresholdMode::Percentage, Color::Green).step(80.0, Color::Purple),
+        ))
+        .panel(
+            BarGauge::new("Mixed steps").thresholds(
+                Thresholds::absolute(Color::Red)
+                    .step(50.0, Color::Yellow)
+                    .step(95.0, Color::custom("dark-green")),
+            ),
+        )
+        .panel(Table::new("Cells").override_field(
+            FieldOverride::by_name("Errors").thresholds(
+                Thresholds::absolute(Color::custom("transparent")).step(5.0, Color::Red),
+            ),
+        ));
+
+    assert_eq!(from_macro, from_builder);
+    from_macro.validate().unwrap();
+}
+
+/// Keys that take a word also take any expression of the builder argument's
+/// type, so house constants and computed values need no special syntax.
+#[test]
+fn word_valued_keys_accept_expressions() {
+    let orientation = Orientation::Vertical;
+    let from_macro = dashboard! {
+        title: "Expressions";
+        cursor_sync: DashboardCursorSync::Tooltip;
+        time: TimeRange::new("now-1h", "now");
+
+        stat "Status" {
+            unit: Unit::Bytes;
+            orientation: (orientation);
+            color: ColorScheme::Fixed(Color::Blue);
+            reduce { calculations: vec![Reducer::Last]; }
+            mapping "1" => "Up" { color: Color::custom("dark-green"); }
+        }
+
+        timeseries "Series" {
+            stacking: Stacking::new(StackingMode::Normal).group("A");
+            tooltip { mode: TooltipMode::Multi; }
+            grid: GridPos::new(0, 0, 12, 8);
+        }
+
+        table "Cells" {
+            cell: GaugeCell::new().mode(BarGaugeDisplayMode::Lcd);
+            sort_by: ("p95", SortDirection::Ascending);
+        }
+    };
+
+    let from_builder = Dashboard::new("Expressions")
+        .cursor_sync(DashboardCursorSync::Tooltip)
+        .time(TimeRange::new("now-1h", "now"))
+        .panel(
+            Stat::new("Status")
+                .unit(Unit::Bytes)
+                .orientation(Orientation::Vertical)
+                .color(ColorScheme::Fixed(Color::Blue))
+                .reduce_options(ReduceOptions::new().calculations([Reducer::Last]))
+                .mapping(
+                    ValueMapping::value("1")
+                        .text("Up")
+                        .color(Color::custom("dark-green")),
+                ),
+        )
+        .panel(
+            Timeseries::new("Series")
+                .stacking(Stacking::new(StackingMode::Normal).group("A"))
+                .tooltip(Tooltip::new().mode(TooltipMode::Multi))
+                .grid_pos(GridPos::new(0, 0, 12, 8)),
+        )
+        .panel(
+            Table::new("Cells")
+                .cell(GaugeCell::new().mode(BarGaugeDisplayMode::Lcd))
+                .sort_by("p95", SortDirection::Ascending),
+        );
+
+    assert_eq!(from_macro, from_builder);
+}
+
+/// Keys the DSL gained alongside the proc-macro rewrite, each mapped to the
+/// builder method it names.
+#[test]
+fn newly_reachable_builder_options_match_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "New keys";
+        schema_version: 39;
+        version: 3;
+        time: ["now-6h", "now"];
+        extra "weekStart": "monday";
+
+        table "Scoped" {
+            query: promql!("up") { ref_id: "A"; editor_mode: code; }
+            query: loki!("{job=\"api\"}") { ref_id: "B"; editor_mode: builder; }
+            transform labels_to_fields only frame_name("series");
+            transform sort_by("Time", desc) only frame_name("series");
+        }
+    };
+
+    let from_builder = Dashboard::new("New keys")
+        .schema_version(39)
+        .version(3)
+        .time(TimeRange::new("now-6h", "now"))
+        .extra("weekStart", json!("monday"))
+        .panel(
+            Table::new("Scoped")
+                .query(
+                    PrometheusQuery::new("up")
+                        .ref_id("A")
+                        .editor_mode(QueryEditorMode::Code),
+                )
+                .query(
+                    LokiQuery::new("{job=\"api\"}")
+                        .ref_id("B")
+                        .editor_mode(QueryEditorMode::Builder),
+                )
+                .transform(LabelsToFields::new().only_frame_name("series"))
+                .transform(SortBy::desc("Time").only_frame_name("series")),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// Stable panel IDs and the Grafana target, each mapped to the builder
+/// method it names.
+#[test]
+fn panel_id_and_target_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Identity";
+        target: v11_5;
+        panel_ids: stable;
+
+        stat "Errors" { key: "errors"; }
+        row "Traffic" {
+            key: "traffic";
+            stat "Requests" {}
+            timeseries "Latency" { key: "latency"; }
+        }
+    };
+
+    let from_builder = Dashboard::new("Identity")
+        .target(GrafanaTarget::V11_5)
+        .panel_ids(PanelIds::Stable)
+        .panel(Stat::new("Errors").key("errors"))
+        .row(
+            Row::new("Traffic")
+                .key("traffic")
+                .panel(Stat::new("Requests"))
+                .panel(Timeseries::new("Latency").key("latency")),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// Pins what the keys change on the wire. The parity test above only shows
+/// the two surfaces agree, which stays true when both are wrong together.
+#[test]
+fn panel_id_and_target_dsl_emits_the_grafana_wire_values() {
+    let ids = |dashboard: Dashboard| -> Vec<u64> {
+        let json: serde_json::Value = serde_json::from_str(&dashboard.to_json().unwrap()).unwrap();
+        assert_eq!(json["schemaVersion"], json!(40));
+        json["panels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|panel| panel["id"].as_u64().unwrap())
+            .collect()
+    };
+
+    let before = ids(dashboard! {
+        title: "Identity";
+        target: v11_5;
+        panel_ids: stable;
+
+        row "Traffic" {
+            key: "traffic";
+            stat "Requests" { key: "requests"; }
+        }
+    });
+    // Renaming the keyed row and panel, and inserting a panel ahead of
+    // them, moves neither ID.
+    let after = ids(dashboard! {
+        title: "Identity";
+        target: v11_5;
+        panel_ids: stable;
+
+        stat "Errors" {}
+        row "Network traffic" {
+            key: "traffic";
+            stat "Request rate" { key: "requests"; }
+        }
+    });
+
+    assert!(before.iter().all(|id| (65_536..1 << 30).contains(id)));
+    assert_eq!(after[1..], before[..]);
+
+    let positional = dashboard! {
+        title: "Identity";
+        panel_ids: positional;
+        stat "Requests" { key: "requests"; }
+    };
+    let json: serde_json::Value = serde_json::from_str(&positional.to_json().unwrap()).unwrap();
+    assert_eq!(json["panels"][0]["id"], json!(1));
+    assert_eq!(
+        json["schemaVersion"],
+        json!(GrafanaTarget::V13.schema_version())
+    );
+}
+
+/// Compile-time check of the macro's key table: every key, on every panel
+/// kind the table says accepts it, must lower to a builder method that
+/// exists for that kind. A table entry that claims too much fails to
+/// compile here instead of in a user's dashboard.
+#[test]
+fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
+    let ids = std::cell::Cell::new(0);
+    let next_id = || {
+        ids.set(ids.get() + 1);
+        ids.get()
+    };
+    macro_rules! common {
+        ($($kind:ident)*) => {
+            dashboard! {
+                title: "Common";
+                variable "instance" { values: ["a", "b"]; }
+                $(
+                    $kind "Common" {
+                        query: promql!("up") {
+                            legend_format: "{{instance}}";
+                            ref_id: "A";
+                            query_type: instant;
+                            datasource: prometheus("main");
+                            hidden: false;
+                            interval: "1m";
+                            editor_mode: code;
+                            format: table;
+                            unit: currency(eur);
+                            color: blue;
+                            display_name: "q";
+                            decimals: 1;
+                            thresholds(green) { 1 => red; }
+                            field_property: OverrideProperty::Min(0.0);
+                        }
+                        query: loki!("{job=\"x\"}") {
+                            legend_format: "l";
+                            ref_id: "B";
+                            query_type: range;
+                            datasource: loki("logs");
+                            hidden: true;
+                            interval: "5m";
+                            editor_mode: builder;
+                        }
+                        query: loki_query!("{job=\"y\"}");
+                        legend_format: "{{job}}";
+                        description: "d";
+                        width: 6;
+                        height: 4;
+                        id: next_id();
+                        key: stringify!($kind);
+                        grid: [0, 0, 6, 4];
+                        datasource: prometheus("main");
+                        unit: custom("widgets");
+                        min: 0.0;
+                        max: 1.0;
+                        decimals: 2;
+                        display_name: "n";
+                        transparent: true;
+                        color: continuous(blues);
+                        thresholds { base: green; 1 => red; }
+                        mapping "0" => "zero" { color: red; }
+                        link "Docs" => "https://docs.example.com" {
+                            target_blank: true;
+                            include_vars: true;
+                            keep_time: true;
+                        }
+                        data_link "Value" => "https://docs.example.com/${__value.raw}";
+                        repeat: vertical("instance");
+                        min_interval: "30s";
+                        max_data_points: 500;
+                        time_from: "1h";
+                        time_shift: "1d";
+                        hide_time_override: true;
+                        override field("a") {
+                            color: "dark-red";
+                            line_width: 2;
+                            cell: auto;
+                            unit: bytes;
+                            min: 0.0;
+                            max: 1.0;
+                            decimals: 1;
+                            display_name: "A";
+                            thresholds(green) { red: 1.0; }
+                            mapping regex("^a") => "A";
+                            data_link "Field" => "https://docs.example.com/field" { keep_time: true; }
+                        }
+                        override regex("^b") { cell: gauge { mode: basic; value_display: color; }; }
+                        override query("A") { cell: sparkline { hide_value: true; line_width: 1.0; fill_opacity: 5.0; }; }
+                        override type("number") { cell: colored_background { mode: basic; apply_to_row: false; }; }
+                        override names ["c", "d"] { cell: colored_text; }
+                        override numeric { unit: none; }
+                        override time { unit: short; }
+                        transform join_by_field("a", outer) only ref_id("A");
+                        transform sort_by("a", asc) only frame_name("f");
+                        transform organize { rename "a" => "b"; hide "c"; order ["b"]; }
+                        transform time_series_to_table { query "A"; query "B": mean; time_field "A": "Time"; }
+                        transform labels_to_fields { mode: rows; keep ["x"]; value_label: "v"; }
+                        transform rename_by_regex("(.*)-api", "$1");
+                        transform: RawTransformation::new("merge");
+                        option "o": 1;
+                        extra "e": 2;
+                    }
+                )*
+            }
+        };
+    }
+    let common = common!(timeseries stat gauge table text bar_gauge heatmap);
+
+    let specific = dashboard! {
+        title: "Kind specific";
+        target: v11_5;
+        panel_ids: stable;
+        built_in_annotation: BuiltInAnnotation::new().hide(true);
+        annotation "Deploys" => "changes(build_info[5m]) > 0" {
+            datasource: prometheus("main");
+            enable: true;
+            hide: false;
+            icon_color: "dark-blue";
+            step: "1m";
+            title_format: "Deploy";
+            text_format: "{{version}}";
+            tag_keys: ["version"];
+            use_value_for_time: false;
+        }
+        annotation: RawAnnotation::new("Other");
+
+        variable "instance" { values: ["a", "b"]; }
+
+        row "Row" {
+            key: "row";
+            collapsed: false;
+            repeat: "instance";
+        }
+
+        text "Text" {
+            content: "c";
+            mode: html;
+        }
+        stat "Stat" {
+            color_mode: none;
+            graph_mode: area;
+            wide_layout: false;
+            orientation: auto;
+            reduce { values: true; calculations: [last, min, max, mean, total]; fields: "/x/"; }
+        }
+        gauge "Gauge" {
+            orientation: horizontal;
+            reduce { values: false; }
+        }
+        bar_gauge "Bar gauge" {
+            display_mode: gradient;
+            orientation: vertical;
+            reduce { fields: "/y/"; }
+        }
+        timeseries "Series" {
+            fill_opacity: 1.0;
+            line_width: 1.0;
+            point_size: 1.0;
+            span_nulls: false;
+            line_interpolation: step_before;
+            show_points: always;
+            stacking: percent;
+            tooltip { mode: single; sort: asc; hide_zeros: false; }
+            legend { position: right; mode: list; values: [last]; }
+        }
+        table "Table" {
+            sort_by: ("a", asc);
+            cell: sparkline { hide_value: false; };
+            color: shades(purple);
+            mapping range(0.0, 1.0) => "low";
+            mapping special(null_or_nan) => "missing" { color: "gray"; }
+        }
+        keyed_table "Keyed" by "route" {
+            sort_by: ("RPS", desc);
+            color: by_name;
+            key_name: "Route";
+            column "RPS" => promql!("sum by (route) (rate(requests_total[5m]))") {
+                unit: reqps;
+                min: 0.0;
+                max: 1e6;
+                decimals: 1;
+                color: green;
+                thresholds(green) { 100 => red; }
+                cell: colored_background { mode: gradient; };
+                property: OverrideProperty::DisplayName("Requests".to_owned());
+            }
+            column "Errors" => PrometheusQuery::new("sum by (route) (rate(errors_total[5m]))");
+            trend last "Trend" => promql!("sum by (route) (rate(requests_total[5m]))") {
+                cell: sparkline { hide_value: true; };
+            }
+        }
+        heatmap "Heatmap" {
+            color_mode: opacity;
+            color_scheme: "Greens";
+            color_steps: 8;
+            cell_gap: 0;
+            show_legend: false;
+            calculate: true;
+            y_axis { unit: milliseconds; placement: right; }
+        }
+    };
+
+    // Compiling is the main assertion; both must also validate.
+    common.validate().unwrap();
+    let common: serde_json::Value = serde_json::from_str(&common.to_json().unwrap()).unwrap();
+    assert_eq!(common["panels"].as_array().map(Vec::len), Some(7));
+    specific.validate().unwrap();
+}
+
+/// The old `macro_rules!` implementation hit the compiler's recursion limit
+/// at a little over a hundred items in one block. The proc macro has no
+/// such limit.
+#[test]
+fn a_block_with_three_hundred_panels_expands() {
+    let dashboard = dashboard! {
+        title: "Many panels";
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+        stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {} stat "p" {}
+    };
+
+    let json: serde_json::Value = serde_json::from_str(&dashboard.to_json().unwrap()).unwrap();
+    assert_eq!(json["panels"].as_array().map(Vec::len), Some(300));
+}
+
+/// `keyed_table … by …` configures a table, then applies the keyed-only keys to the `KeyedTable` that `.keyed(..)` returns, whatever order they are written in.
+#[test]
+fn keyed_table_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Routes";
+        datasource: prometheus("prometheus-main");
+
+        row "Routes" {
+            keyed_table "Route performance" by "route" {
+                key_name: "Route";
+                column "RPS" => promql!("sum by (route) (rate(requests_total[5m]))") {
+                    unit: reqps;
+                }
+                width: 24;
+                column "p95" => promql!("histogram_quantile(0.95, sum by (route, le) (rate(duration_bucket[5m])))") {
+                    unit: seconds;
+                    cell: colored_background;
+                    thresholds(green) { yellow: 0.3; red: 1.0; }
+                }
+                trend last "Trend" => promql!("sum by (route) (rate(requests_total[5m]))") {
+                    cell: sparkline { hide_value: true; };
+                }
+                sort_by: ("p95", desc);
+            }
+            keyed_table from Table::new("Hosts").height(6) by "instance" {
+                column "Up" => PrometheusQuery::new("up");
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Routes")
+        .datasource(prometheus("prometheus-main"))
+        .row(
+            Row::new("Routes")
+                .panel(
+                    Table::new("Route performance")
+                        .width(24)
+                        .sort_by("p95", SortDirection::Descending)
+                        .keyed("route")
+                        .key_name("Route")
+                        .column(
+                            Column::new(
+                                "RPS",
+                                PrometheusQuery::new("sum by (route) (rate(requests_total[5m]))"),
+                            )
+                            .unit(Unit::RequestsPerSecond),
+                        )
+                        .column(
+                            Column::new(
+                                "p95",
+                                PrometheusQuery::new(
+                                    "histogram_quantile(0.95, sum by (route, le) (rate(duration_bucket[5m])))",
+                                ),
+                            )
+                            .unit(Unit::Seconds)
+                            .cell(TableCellType::ColoredBackground)
+                            .thresholds(
+                                Thresholds::absolute(Color::Green)
+                                    .step(0.3, Color::Yellow)
+                                    .step(1.0, Color::Red),
+                            ),
+                        )
+                        .column(
+                            Column::trend(
+                                "Trend",
+                                PrometheusQuery::new("sum by (route) (rate(requests_total[5m]))"),
+                                Reducer::Last,
+                            )
+                            .cell(SparklineCell::new().hide_value(true)),
+                        ),
+                )
+                .panel(
+                    Table::new("Hosts")
+                        .height(6)
+                        .keyed("instance")
+                        .column(Column::new("Up", PrometheusQuery::new("up"))),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// Per-query field configuration, palette and currency words, `rename_by_regex`, and the mapping and data link keys inside overrides.
+#[test]
+fn query_field_config_and_new_words_match_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Fields";
+
+        timeseries "Latency" {
+            query: promql!("histogram_quantile(0.99, sum by (le) (rate(duration_bucket[5m])))") {
+                ref_id: "A";
+                query_type: range;
+                unit: seconds;
+                color: orange;
+                display_name: "p99";
+                decimals: 2;
+                thresholds(green) { 1 => red; }
+            }
+            color: continuous(blue_yellow_red);
+        }
+
+        table "Prices" {
+            query: promql!("price") { ref_id: "B"; }
+            unit: currency(gbp);
+            transform rename_by_regex("(.*)_total", "$1");
+            override field("status") {
+                mapping "0" => "Down" { color: red; }
+                data_link "Runbook" => "https://runbooks.example.com/${__value.text}";
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Fields")
+        .panel(
+            Timeseries::new("Latency")
+                .query(
+                    PrometheusQuery::new(
+                        "histogram_quantile(0.99, sum by (le) (rate(duration_bucket[5m])))",
+                    )
+                    .ref_id("A")
+                    .query_type(QueryType::Range)
+                    .unit(Unit::Seconds)
+                    .color(Color::Orange)
+                    .display_name("p99")
+                    .decimals(2)
+                    .thresholds(Thresholds::absolute(Color::Green).step(1.0, Color::Red)),
+                )
+                .color(ColorScheme::Continuous(ContinuousPalette::BlueYellowRed)),
+        )
+        .panel(
+            Table::new("Prices")
+                .query(PrometheusQuery::new("price").ref_id("B"))
+                .unit(Unit::Currency(Currency::Gbp))
+                .transform(RenameByRegex::new("(.*)_total", "$1"))
+                .override_field(
+                    FieldOverride::by_name("status")
+                        .mapping(ValueMapping::value("0").text("Down").color(Color::Red))
+                        .data_link(DataLink::new(
+                            "Runbook",
+                            "https://runbooks.example.com/${__value.text}",
+                        )),
+                ),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// `datasource: mixed;` on a panel selects Grafana's mixed datasource, and each query names its own.
+#[test]
+fn mixed_datasource_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Mixed";
+
+        timeseries "Requests and errors" {
+            datasource: mixed;
+            query: promql!("sum(rate(http_requests_total[$__rate_interval]))") {
+                datasource: prometheus("prometheus-main");
+            }
+            query: loki!("sum(count_over_time({job=\"api\"} |= \"error\" [$__interval]))") {
+                datasource: loki("logs");
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Mixed").panel(
+        Timeseries::new("Requests and errors")
+            .datasource(DataSource::mixed())
+            .query(
+                PrometheusQuery::new("sum(rate(http_requests_total[$__rate_interval]))")
+                    .datasource(prometheus("prometheus-main")),
+            )
+            .query(
+                LokiQuery::new("sum(count_over_time({job=\"api\"} |= \"error\" [$__interval]))")
+                    .datasource(loki("logs")),
+            ),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    from_macro.validate().unwrap();
 }

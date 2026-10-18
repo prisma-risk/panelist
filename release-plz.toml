@@ -24,3 +24,25 @@ semver_check = false
 # Release only for user-visible changes. Other commits remain eligible for the
 # changelog when a release-worthy commit is present.
 release_commits = "^(feat|fix|perf|refactor)"
+
+# `panelist` and `panelist-macros` release in lockstep: both inherit the
+# workspace version, and `panelist` pins `panelist-macros` with an exact `=`
+# requirement, so a release of one without the other cannot resolve.
+[[package]]
+name = "panelist"
+version_group = "panelist"
+# Keep the single-crate tag and release names. With two public packages the
+# default would become `panelist-v{{ version }}`.
+git_tag_name = "v{{ version }}"
+git_release_name = "v{{ version }}"
+# Macro changes are user-facing `panelist` changes.
+changelog_include = ["panelist-macros"]
+
+[[package]]
+name = "panelist-macros"
+version_group = "panelist"
+# Released under the `panelist` tag, GitHub Release, and changelog.
+git_tag_enable = false
+git_release_enable = false
+changelog_update = false
+changelog_include = ["panelist"]

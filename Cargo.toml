@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/panelist"]
+members = ["crates/panelist", "crates/panelist-macros"]
 
 [workspace.package]
 version = "0.3.0"
@@ -16,8 +16,13 @@ readme = "README.md"
 publish = true
 
 [workspace.dependencies]
+# Released in lockstep with `panelist`, which pins it exactly.
+panelist-macros = { version = "=0.3.0", path = "crates/panelist-macros" }
+proc-macro2 = "1"
+quote = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+syn = { version = "3", default-features = false }
 thiserror = "2"
 
 [workspace.lints.rust]

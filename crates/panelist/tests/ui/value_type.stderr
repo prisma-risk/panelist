@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+  --> tests/ui/value_type.rs:30:20
+   |
+30 |             width: "wide";
+   |             -----  ^^^^^^ expected `u16`, found `&str`
+   |             |
+   |             arguments to this method are incorrect
+   |
+note: method defined here
+  --> src/panel.rs
+   |
+   |     pub fn width(mut self, width: u16) -> Self {
+   |            ^^^^^

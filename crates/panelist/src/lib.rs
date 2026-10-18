@@ -121,9 +121,15 @@ pub use visualization::{
     Tooltip, TooltipMode, TooltipSort,
 };
 
+/// Compiles and runs every Rust example in the README as a doctest.
+#[cfg(doctest)]
+#[doc = include_str!("../../../README.md")]
+struct ReadmeDoctests;
+
 #[doc(hidden)]
 pub mod __private {
     pub use crate::promql::{check_legend, render_legend};
+    pub use panelist_macros::dashboard;
     pub use serde_json;
 }
 

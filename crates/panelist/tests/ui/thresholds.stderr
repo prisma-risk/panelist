@@ -1,0 +1,32 @@
+error: thresholds need a base color, the color below the lowest step: write `thresholds(<color>) { … }` or put `base: <color>;` in the block
+  --> tests/ui/thresholds.rs:30:13
+   |
+30 |             thresholds { 50 => yellow; 90 => red; }
+   |             ^^^^^^^^^^
+
+error: thresholds take one base color
+  --> tests/ui/thresholds.rs:33:33
+   |
+33 |             thresholds(green) { base: blue; 90 => red; }
+   |                                 ^^^^
+
+error: unknown thresholds key `bse`; did you mean `base`?
+       accepted: `base: <color>;`, `mode: absolute | percentage;`, steps written `<value> => <color>;`, and `<color word>: <value>;` for `green`, `yellow`, `red`, `blue`, `orange`, or `purple`
+  --> tests/ui/thresholds.rs:36:26
+   |
+36 |             thresholds { bse: green; 50 => yelow; }
+   |                          ^^^
+
+error: unknown color `yelow`; did you mean `yellow`?
+       accepted: `green`, `yellow`, `red`, `blue`, `orange`, `purple`, `"<any color>"`; or any expression of type `Color`, such as `(yelow)` for a variable
+  --> tests/ui/thresholds.rs:36:44
+   |
+36 |             thresholds { bse: green; 50 => yelow; }
+   |                                            ^^^^^
+
+error: unknown thresholds key `gray`
+       accepted: `base: <color>;`, `mode: absolute | percentage;`, steps written `<value> => <color>;`, and `<color word>: <value>;` for `green`, `yellow`, `red`, `blue`, `orange`, or `purple`
+  --> tests/ui/thresholds.rs:39:33
+   |
+39 |             thresholds(green) { gray: 50.0; }
+   |                                 ^^^^
