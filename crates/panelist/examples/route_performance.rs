@@ -145,7 +145,7 @@ fn main() -> panelist::Result<()> {
                 transform time_series_to_table {
                     query "H": last;
                 }
-                transform join_by_field("route", outer_tabular);
+                transform join_by_field("route", outer);
                 transform organize {
                     rename "Value #A" => "RPS";
                     rename "Value #B" => "4xx rate";
