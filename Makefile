@@ -35,12 +35,13 @@ doc:
 headers:
 	python3 scripts/check-panelist-header.py
 	cmp LICENSE crates/panelist/LICENSE
+	cmp LICENSE crates/panelist-macros/LICENSE
 
 package:
-	$(CARGO) package -p panelist --allow-dirty --locked
+	$(CARGO) package --workspace --allow-dirty --locked
 
 release-dry-run:
-	$(CARGO) publish --dry-run -p panelist --locked
+	$(CARGO) publish --dry-run --workspace --locked
 
 deny:
 	$(CARGO) deny check $(CARGO_DENY_CHECK_FLAGS)
@@ -73,7 +74,7 @@ help:
 	@echo "  make test         Test the locked workspace"
 	@echo "  make doc          Build rustdoc with warnings denied"
 	@echo "  make headers      Verify Rust source headers"
-	@echo "  make package      Verify the distributable crate tarball"
+	@echo "  make package      Verify the distributable crate tarballs"
 	@echo "  make release-dry-run  Validate the crates.io upload without publishing"
 	@echo "  make deny         Check licenses and advisories"
 	@echo "  make verify-grafana  Round-trip golden dashboards through Grafana (needs Docker)"

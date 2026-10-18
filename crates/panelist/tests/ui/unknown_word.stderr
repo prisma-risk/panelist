@@ -1,0 +1,41 @@
+error: unknown cursor sync `crosshar`; did you mean `crosshair`?
+       accepted: `off`, `crosshair`, `tooltip`; or any expression of type `DashboardCursorSync`, such as `(crosshar)` for a variable
+  --> tests/ui/unknown_word.rs:29:22
+   |
+29 |         cursor_sync: crosshar;
+   |                      ^^^^^^^^
+
+error: unknown unit `second`; did you mean `seconds`?
+       accepted: `seconds`, `milliseconds`, `bytes`, `bytes_per_second`, `percent`, `percent_unit`, `reqps`, `ops`, `short`, `none`, `custom(<unit>)`; or any expression of type `Unit`, such as `(second)` for a variable
+  --> tests/ui/unknown_word.rs:31:19
+   |
+31 |             unit: second;
+   |                   ^^^^^^
+
+error: `scheme` is a heatmap color mode for `heatmap` panels, not for a `stat` panel
+       accepted here: `value`, `background`, `none`
+  --> tests/ui/unknown_word.rs:32:25
+   |
+32 |             color_mode: scheme;
+   |                         ^^^^^^
+
+error: unknown color `gren`; did you mean `green`?
+       accepted: `green`, `yellow`, `red`, `blue`, `orange`, `purple`, `"<any color>"`; or any expression of type `Color`, such as `(gren)` for a variable
+  --> tests/ui/unknown_word.rs:33:26
+   |
+33 |             color: fixed(gren);
+   |                          ^^^^
+
+error: unknown tooltip mode `mult`; did you mean `multi`?
+       accepted: `single`, `multi`, `none`; or any expression of type `TooltipMode`, such as `(mult)` for a variable
+  --> tests/ui/unknown_word.rs:36:29
+   |
+36 |             tooltip { mode: mult; }
+   |                             ^^^^
+
+error: unknown reducer `maximum`
+       accepted: `last`, `min`, `max`, `mean`, `total`; or any expression of type `Reducer`, such as `(maximum)` for a variable
+  --> tests/ui/unknown_word.rs:37:37
+   |
+37 |             legend { values: [last, maximum]; }
+   |                                     ^^^^^^^

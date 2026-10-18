@@ -1,0 +1,31 @@
+error: thresholds with `<value> => <color>;` steps need a `base: <color>;` first, the color below the lowest step
+  --> tests/ui/thresholds.rs:30:26
+   |
+30 |             thresholds { 50 => yellow; 90 => red; }
+   |                          ^^
+
+error: `yellow:` cannot be mixed with `base:` and `<value> => <color>;` steps; write `<value> => yellow;`
+  --> tests/ui/thresholds.rs:33:39
+   |
+33 |             thresholds { base: green; yellow: 50.0; 90 => red; }
+   |                                       ^^^^^^
+
+error: `base:` must come before the `<value> => <color>;` steps
+  --> tests/ui/thresholds.rs:36:40
+   |
+36 |             thresholds { 50 => yellow; base: green; }
+   |                                        ^^^^
+
+error: unknown thresholds key `bse`; did you mean `base`?
+       accepted: `base: <color>;`, `mode: absolute | percentage;`, and steps written `<value> => <color>;`
+  --> tests/ui/thresholds.rs:39:26
+   |
+39 |             thresholds { bse: green; 50 => yelow; }
+   |                          ^^^
+
+error: unknown color `yelow`; did you mean `yellow`?
+       accepted: `green`, `yellow`, `red`, `blue`, `orange`, `purple`, `"<any color>"`; or any expression of type `Color`, such as `(yelow)` for a variable
+  --> tests/ui/thresholds.rs:39:44
+   |
+39 |             thresholds { bse: green; 50 => yelow; }
+   |                                            ^^^^^

@@ -39,7 +39,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings -D missing-docs
         run: cargo doc --workspace --all-features --no-deps --locked
       - name: Package
-        run: cargo package -p panelist --locked
+        run: cargo package --workspace --locked
 
   supply-chain:
     name: Supply chain

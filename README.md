@@ -3,7 +3,7 @@
 Panelist is a Rust library for writing Grafana dashboards as concise, strongly
 typed code.
 
-```rust
+```rust,no_run
 use panelist::prelude::*;
 
 let dashboard = dashboard! {
@@ -56,9 +56,7 @@ async runtime or network client dependency.
 
 ## Macro DSL
 
-The macro translates a small amount of syntax into ordinary typed builders. It
-does not add loops, conditions, interpolation, or its own composition language:
-Rust remains the composition language.
+`dashboard!` translates a small amount of syntax into ordinary typed builders. Every entry lowers to exactly one builder call, and every value is a Rust expression checked by the compiler where the builder receives it. The macro adds no loops or conditions of its own: Rust remains the composition language.
 
 ```rust
 use panelist::prelude::*;
@@ -99,6 +97,70 @@ let dashboard = dashboard! {
 The DSL supports `timeseries`, `stat`, `gauge`, `table`, `text`, `bar_gauge`,
 and `heatmap` panels at both dashboard and row level. `promql!` and `loki!`
 create typed query builders rather than opaque JSON values.
+
+Titles, variable names, and link targets are expressions, so dashboards can be generated from data. `panel: <expr>;` drops in one panel built in Rust and `panels: <expr>;` drops in any iterator of them. `<kind> from <expr> { … }` continues a builder from your own house-default function; the base keeps its title, and giving the block a title as well is a compile error:
+
+```rust
+use panelist::prelude::*;
+
+fn house_stat(title: &str) -> Stat {
+    Stat::new(title).graph_mode(StatGraphMode::None).width(4)
+}
+
+let services = ["auth", "billing", "search"];
+let dashboard = dashboard! {
+    title: "Services";
+
+    stat from house_stat("Availability") {
+        query: promql!("avg(up)");
+        unit: percent_unit;
+    }
+
+    row "Per service" {
+        panels: services.iter().map(|service| {
+            house_stat(&format!("{service} errors")).query(PrometheusQuery::new(format!(
+                "sum(rate({service}_errors_total[$__rate_interval]))"
+            )))
+        });
+    }
+
+    row format!("{} latency", services[0]) {
+        timeseries format!("{} p99", services[0]) {
+            query: promql!(format!("histogram_quantile(0.99, sum by (le) (rate({}_duration_seconds_bucket[$__rate_interval])))", services[0]));
+            unit: seconds;
+        }
+        panel: Text::new("Notes").content("Latency targets live in the runbook.");
+    }
+};
+# let _ = dashboard;
+```
+
+A title runs up to the `{` that opens its block. Wrap one that contains a block of its own in parentheses: `stat (if critical { "Errors!" } else { "Errors" }) { … }`.
+
+Thresholds take a mandatory base color and then ascending `value => color` steps. A color is one of the named colors, a string naming any other Grafana color, or a `Color` expression:
+
+```rust
+use panelist::prelude::*;
+
+let warning = 70.0;
+let dashboard = dashboard! {
+    title: "Saturation";
+
+    gauge "CPU" {
+        query: promql!("avg(rate(cpu_seconds_total[$__rate_interval])) * 100");
+        unit: percent;
+        thresholds {
+            base: blue;
+            50 => green;
+            warning => orange;
+            90 => "dark-red";
+        }
+    }
+};
+# let _ = dashboard;
+```
+
+The older `green: 0.0; yellow: 1.0; red: 5.0;` shorthand still works on its own.
 
 Dashboard links, cursor sync, and the full variable surface are reachable
 too:
@@ -204,10 +266,7 @@ let dashboard = dashboard! {
 # let _ = dashboard;
 ```
 
-`color_mode` is shared between stat and heatmap panels and takes a different
-vocabulary on each — `value`/`background`/`none` versus `scheme`/`opacity`.
-The two sets are disjoint, so the right one is selected by what you write, and
-pairing a panel kind with the wrong vocabulary is a compile error.
+`color_mode` is shared between stat and heatmap panels and takes a different vocabulary on each: `value`/`background`/`none` versus `scheme`/`opacity`. A key that takes a word also takes any expression of the builder argument's type, such as `unit: Unit::custom("USD");`. A lone identifier is read as a word, so wrap a local variable in parentheses: `orientation: (orientation);`.
 
 Table panels can transform, sort, and style their columns without leaving
 the DSL:
@@ -321,6 +380,18 @@ let dashboard = dashboard! {
 };
 # let _ = dashboard;
 ```
+
+Mistakes are compile errors at the token that caused them. A typo names the closest valid key and lists every key the block accepts. A key that does not apply to the panel kind says which kinds it applies to:
+
+```text
+error: `fill_opacity` does not apply to a `stat` panel; it applies to `timeseries` panels
+  --> src/dashboards.rs:12:13
+   |
+12 |             fill_opacity: 10.0;
+   |             ^^^^^^^^^^^^
+```
+
+The [`dashboard!` reference](https://docs.rs/panelist/latest/panelist/macro.dashboard.html) lists every key.
 
 ## Builder API
 
@@ -466,7 +537,7 @@ let dashboard = dashboard! {
 `Dashboard` implements `serde::Serialize`, so normal `serde_json` APIs work.
 The convenience methods add structured errors and file output:
 
-```rust
+```rust,no_run
 # use panelist::prelude::*;
 # let dashboard = Dashboard::new("Example");
 dashboard.validate()?;
