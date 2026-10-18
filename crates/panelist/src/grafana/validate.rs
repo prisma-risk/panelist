@@ -38,6 +38,14 @@ pub(crate) fn validate(dashboard: &Dashboard) -> Result<(), ValidationErrors> {
     if dashboard.title.trim().is_empty() {
         errors.push(ValidationError::MissingDashboardTitle);
     }
+    if let Some(uid) = &dashboard.uid
+        && let Some(reason) = uid_problem(uid)
+    {
+        errors.push(ValidationError::InvalidDashboardUid {
+            uid: uid.clone(),
+            reason,
+        });
+    }
     for variable in &dashboard.variables {
         if variable.name().trim().is_empty() {
             errors.push(ValidationError::MissingVariableName);
@@ -260,6 +268,22 @@ impl<'a> References<'a> {
                 errors.push(error);
             }
         }
+    }
+}
+
+/// Mirrors Grafana's `IsValidShortUID` and `MaxUIDLength`, which reject a dashboard save outright.
+fn uid_problem(uid: &str) -> Option<&'static str> {
+    if uid.is_empty() {
+        Some("must not be empty")
+    } else if uid.len() > 40 {
+        Some("is longer than Grafana's 40-character limit")
+    } else if !uid
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        Some("may only contain ASCII letters, digits, '-', and '_'")
+    } else {
+        None
     }
 }
 

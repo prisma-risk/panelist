@@ -41,16 +41,24 @@ mod wire;
 
 pub(crate) use wire::NormalizedDashboard;
 
-use layout::{FlowLayout, IdAllocator, explicit_panel_ids};
+use layout::{FlowLayout, assign_panel_ids};
 use panel::{normalize_panel, normalize_row};
 use validate::validate;
 use variable::normalize_variable;
 use wire::{GrafanaAnnotations, GrafanaLink, GrafanaTemplating, GrafanaTimeRange};
 
 pub(crate) fn normalize(dashboard: &Dashboard) -> Result<NormalizedDashboard, ValidationErrors> {
-    validate(dashboard)?;
-
-    let mut allocator = IdAllocator::new(explicit_panel_ids(dashboard));
+    // Both passes run before either reports, so one call lists every mistake.
+    let ids = match (validate(dashboard), assign_panel_ids(dashboard)) {
+        (Ok(()), Ok(ids)) => ids,
+        (validated, assigned) => {
+            let mut errors = validated.err().map(|errors| errors.0).unwrap_or_default();
+            errors.extend(assigned.err().unwrap_or_default());
+            return Err(ValidationErrors(errors));
+        }
+    };
+    let mut ids = ids.into_iter();
+    let mut next_id = || ids.next().unwrap_or_default();
     let mut panels = Vec::new();
     let mut current_y = 0;
     let mut top_level_flow = FlowLayout::new(current_y);
@@ -59,7 +67,7 @@ pub(crate) fn normalize(dashboard: &Dashboard) -> Result<NormalizedDashboard, Va
         match item {
             DashboardItem::Panel(panel) => {
                 let grid = top_level_flow.place(panel);
-                let id = allocator.panel_id(panel.id);
+                let id = next_id();
                 panels.push(normalize_panel(
                     panel,
                     id,
@@ -71,13 +79,13 @@ pub(crate) fn normalize(dashboard: &Dashboard) -> Result<NormalizedDashboard, Va
             DashboardItem::Row(row) => {
                 current_y = top_level_flow.bottom().max(current_y);
                 let row_y = current_y;
-                let row_id = allocator.panel_id(None);
+                let row_id = next_id();
                 let mut row_flow = FlowLayout::new(row_y.saturating_add(1));
                 let mut row_panels = Vec::with_capacity(row.panels.len());
 
                 for panel in &row.panels {
                     let grid = row_flow.place(panel);
-                    let id = allocator.panel_id(panel.id);
+                    let id = next_id();
                     row_panels.push(normalize_panel(
                         panel,
                         id,
@@ -134,7 +142,7 @@ pub(crate) fn normalize(dashboard: &Dashboard) -> Result<NormalizedDashboard, Va
             ),
         },
         refresh: dashboard.refresh.clone(),
-        schema_version: dashboard.schema_version,
+        schema_version: dashboard.effective_schema_version(),
         version: dashboard.version,
         links: dashboard.links.iter().map(GrafanaLink::from).collect(),
         extra: dashboard.extra.clone(),

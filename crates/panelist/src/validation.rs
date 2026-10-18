@@ -130,6 +130,40 @@ pub enum ValidationError {
         /// Later panel title.
         panel: String,
     },
+    /// Two panels or rows end up with the same ID under [`PanelIds::Stable`](crate::PanelIds::Stable).
+    ///
+    /// Either both derived the same ID, or a derived ID equals an explicit one. Give one of them a distinct key, or a different explicit ID.
+    #[error("panel ID {id} is shared by {first} and {second}; give one of them a distinct key")]
+    PanelIdCollision {
+        /// The shared ID.
+        id: u32,
+        /// The panel or row that claimed the ID first, in dashboard order.
+        first: String,
+        /// The panel or row that collided with it.
+        second: String,
+    },
+    /// A panel key is empty or only whitespace.
+    #[error("panel \"{panel}\": key must not be blank")]
+    BlankPanelKey {
+        /// Panel title.
+        panel: String,
+    },
+    /// A row key is empty or only whitespace.
+    #[error("row \"{row}\": key must not be blank")]
+    BlankRowKey {
+        /// Row title.
+        row: String,
+    },
+    /// The dashboard UID is one Grafana refuses to save.
+    ///
+    /// Grafana accepts at most 40 characters, each an ASCII letter, digit, `-`, or `_`.
+    #[error("dashboard UID \"{uid}\" {reason}")]
+    InvalidDashboardUid {
+        /// The rejected UID.
+        uid: String,
+        /// Why Grafana rejects it.
+        reason: &'static str,
+    },
     /// Two queries in a panel use the same explicit reference ID.
     #[error("panel \"{panel}\": duplicate query reference ID \"{ref_id}\"")]
     DuplicateQueryRefId {

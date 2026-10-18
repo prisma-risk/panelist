@@ -62,17 +62,89 @@ fn golden_dashboard() -> Dashboard {
     }
 }
 
+/// The committed golden directory for `target`, relative to `tests/golden`.
+///
+/// The default target keeps the top-level directory; every other target has a subdirectory. `scripts/verify-grafana.sh` round-trips each directory through that target's Grafana release.
+fn golden_dir(target: GrafanaTarget) -> &'static str {
+    match target {
+        GrafanaTarget::V11_5 => "v11_5/",
+        _ => "",
+    }
+}
+
+/// Compares `dashboard`, rendered for every target, against that target's committed golden file. `UPDATE_GOLDEN=1` rewrites them instead.
+fn assert_golden_for_every_target(dashboard: &Dashboard, file: &str) {
+    assert_eq!(GrafanaTarget::default(), GrafanaTarget::V13);
+    for &target in GrafanaTarget::ALL {
+        let actual = match dashboard.clone().target(target).to_json_pretty() {
+            Ok(rendered) => format!("{rendered}\n"),
+            Err(error) => panic!("{target:?} golden should serialize: {error}"),
+        };
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/golden")
+            .join(golden_dir(target))
+            .join(file);
+
+        if std::env::var_os("UPDATE_GOLDEN").is_some() {
+            let written = path
+                .parent()
+                .map_or(Ok(()), fs::create_dir_all)
+                .and_then(|()| fs::write(&path, &actual));
+            if let Err(error) = written {
+                panic!("could not update {}: {error}", path.display());
+            }
+        }
+
+        let expected = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("could not read {}: {error}", path.display()));
+        assert_eq!(actual, expected, "{target:?} golden {}", path.display());
+    }
+}
+
 #[test]
 fn generated_json_matches_committed_golden_file() {
-    let actual = format!("{}\n", golden_dashboard().to_json_pretty().unwrap());
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/basic.json");
+    assert_golden_for_every_target(&golden_dashboard(), "basic.json");
+}
 
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        fs::write(&path, &actual).unwrap();
+#[test]
+fn default_target_output_is_unchanged_by_naming_it() {
+    let dashboard = golden_dashboard();
+    assert_eq!(
+        dashboard.to_json_pretty().unwrap(),
+        dashboard
+            .clone()
+            .target(GrafanaTarget::V13)
+            .to_json_pretty()
+            .unwrap()
+    );
+}
+
+/// Every target's golden must differ from the default only where a target gates the wire format. Today that is `schemaVersion` alone; a new gate must be listed here, so a difference cannot appear by accident.
+#[test]
+fn targets_differ_only_in_gated_properties() {
+    let schema_line =
+        |target: GrafanaTarget| format!("\"schemaVersion\": {}", target.schema_version());
+    for dashboard in [
+        golden_dashboard(),
+        route_performance_dashboard(),
+        stable_ids_dashboard(),
+        panel_features_dashboard(),
+    ] {
+        let default = dashboard.to_json_pretty().unwrap();
+        for &target in GrafanaTarget::ALL {
+            let targeted = dashboard.clone().target(target).to_json_pretty().unwrap();
+            assert_eq!(
+                targeted.matches(&schema_line(target)).count(),
+                1,
+                "{target:?}"
+            );
+            assert_eq!(
+                targeted.replace(&schema_line(target), &schema_line(GrafanaTarget::default())),
+                default,
+                "{target:?}"
+            );
+        }
     }
-
-    let expected = fs::read_to_string(path).unwrap();
-    assert_eq!(actual, expected);
 }
 
 /// The acceptance dashboard for the whole typed-transformations effort: a
@@ -325,19 +397,42 @@ fn route_performance_dashboard() -> Dashboard {
 
 #[test]
 fn route_performance_matches_the_committed_golden_file() {
-    let actual = format!(
-        "{}\n",
-        route_performance_dashboard().to_json_pretty().unwrap()
-    );
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/route_performance.json");
+    assert_golden_for_every_target(&route_performance_dashboard(), "route_performance.json");
+}
 
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        fs::write(&path, &actual).unwrap();
-    }
+/// Stable panel IDs are large numbers. Round-tripping this golden through each target's Grafana proves Grafana stores IDs from the derived range unchanged, for rows, keyed and unkeyed panels, top-level panels, and panels nested in a collapsed row.
+fn stable_ids_dashboard() -> Dashboard {
+    Dashboard::new("Stable IDs")
+        .uid("golden-stable-ids")
+        .datasource(prometheus("prometheus-main"))
+        .panel_ids(PanelIds::Stable)
+        .panel(Text::new("About").content("Panel IDs here survive reordering."))
+        .row(
+            Row::new("Traffic")
+                .key("traffic")
+                .panel(
+                    Stat::new("Requests")
+                        .query(PrometheusQuery::new("sum(rate(requests_total[5m]))"))
+                        .unit(Unit::RequestsPerSecond),
+                )
+                .panel(
+                    Timeseries::new("Errors")
+                        .key("errors")
+                        .query(PrometheusQuery::new("sum(rate(errors_total[5m]))")),
+                ),
+        )
+        .row(
+            Row::new("Details")
+                .collapsed(true)
+                .panel(Timeseries::new("Latency").query(PrometheusQuery::new(
+                    "histogram_quantile(0.99, sum by (le) (rate(latency_seconds_bucket[5m])))",
+                ))),
+        )
+}
 
-    let expected = fs::read_to_string(path).unwrap();
-    assert_eq!(actual, expected);
+#[test]
+fn stable_ids_match_the_committed_golden_file() {
+    assert_golden_for_every_target(&stable_ids_dashboard(), "stable_ids.json");
 }
 
 /// Repeats, panel query options and time overrides, every value mapping kind, panel and field data links, and annotations. `make verify-grafana` round-trips this golden too, which is what proves Grafana keeps each of these keys.
@@ -426,15 +521,7 @@ fn panel_features_dashboard() -> Dashboard {
 
 #[test]
 fn panel_features_match_the_committed_golden_file() {
-    let actual = format!("{}\n", panel_features_dashboard().to_json_pretty().unwrap());
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/panel_features.json");
-
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        fs::write(&path, &actual).unwrap();
-    }
-
-    let expected = fs::read_to_string(path).unwrap();
-    assert_eq!(actual, expected);
+    assert_golden_for_every_target(&panel_features_dashboard(), "panel_features.json");
 }
 
 // ---------------------------------------------------------------------------

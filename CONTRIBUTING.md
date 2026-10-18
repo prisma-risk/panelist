@@ -50,8 +50,7 @@ make verify-grafana  # needs Docker: round-trips the goldens through a real Graf
 make demo            # needs Docker: serves every example on a live Grafana
 ```
 
-Set `UPDATE_GOLDEN=1` when an intentional wire-format change requires updating
-the committed golden dashboard, then review the JSON diff before committing.
+Set `UPDATE_GOLDEN=1` when an intentional wire-format change requires updating the committed golden dashboards, then review the JSON diff before committing. Each `GrafanaTarget` has its own golden directory (`tests/golden` for the default target, `tests/golden/v11_5` for 11.5), and `UPDATE_GOLDEN=1` rewrites all of them.
 
 A change that alters what an example renders should ship a refreshed
 screenshot: `make render-examples` regenerates every image in

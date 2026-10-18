@@ -61,14 +61,18 @@ mod link;
 mod macros;
 mod panel;
 mod query;
+pub mod render;
 mod table;
+mod target;
 mod transformation;
 mod validation;
 mod variable;
 mod visualization;
 
 pub use annotation::{Annotation, BuiltInAnnotation, PrometheusAnnotation, RawAnnotation};
-pub use dashboard::{Dashboard, DashboardCursorSync, DashboardItem, DashboardLink, Row, TimeRange};
+pub use dashboard::{
+    Dashboard, DashboardCursorSync, DashboardItem, DashboardLink, PanelIds, Row, TimeRange,
+};
 pub use datasource::{DataSource, loki, prometheus};
 pub use field::{
     Color, ColorScheme, FieldConfig, FieldOverride, Legend, LegendMode, LegendPlacement,
@@ -84,10 +88,12 @@ pub use panel::{
 pub use query::{
     LokiQuery, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode, QueryOptions, RawQuery,
 };
+pub use render::DashboardSet;
 pub use table::{
     CellBackgroundMode, CellValueDisplay, ColoredBackgroundCell, GaugeCell, SparklineCell,
     TableCell, TableCellType,
 };
+pub use target::GrafanaTarget;
 pub use transformation::{
     JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, OrganizeFields, RawTransformation,
     SortBy, TimeSeriesToTable, Transformation,
@@ -115,16 +121,17 @@ pub mod prelude {
         CellBackgroundMode, CellValueDisplay, Color, ColorScheme, ColoredBackgroundCell,
         ConstantVariable, CustomVariable, Dashboard, DashboardCursorSync, DashboardLink, DataLink,
         DataLinkVariable, DataSource, DataSourceVariable, FieldConfig, FieldOverride, Gauge,
-        GaugeCell, GridPos, Heatmap, HeatmapColorMode, HeatmapColorScheme, JoinByField, JoinMode,
-        LabelsToFields, LabelsToFieldsMode, Legend, LegendMode, LegendPlacement, LineInterpolation,
-        LokiQuery, OrganizeFields, Orientation, OverrideMatcher, OverrideProperty, Panel,
-        PanelKind, PointVisibility, PrometheusAnnotation, PrometheusFormat, PrometheusQuery, Query,
-        QueryEditorMode, QueryVariable, RawAnnotation, RawPanel, RawQuery, RawTransformation,
-        ReduceOptions, Reducer, Repeat, Row, SortBy, SortDirection, SparklineCell, SpecialValue,
-        Stacking, StackingMode, Stat, StatColorMode, StatGraphMode, Table, TableCell,
-        TableCellType, Text, TextMode, ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable,
-        Timeseries, Tooltip, TooltipMode, TooltipSort, Transformation, Unit, ValueMapping,
-        Variable, VariableBuilder, VariableRefresh, VariableSelection, VariableSort, dashboard,
-        loki, loki_query, prometheus, promql,
+        GaugeCell, GrafanaTarget, GridPos, Heatmap, HeatmapColorMode, HeatmapColorScheme,
+        JoinByField, JoinMode, LabelsToFields, LabelsToFieldsMode, Legend, LegendMode,
+        LegendPlacement, LineInterpolation, LokiQuery, OrganizeFields, Orientation,
+        OverrideMatcher, OverrideProperty, Panel, PanelIds, PanelKind, PointVisibility,
+        PrometheusAnnotation, PrometheusFormat, PrometheusQuery, Query, QueryEditorMode,
+        QueryVariable, RawAnnotation, RawPanel, RawQuery, RawTransformation, ReduceOptions,
+        Reducer, Repeat, Row, SortBy, SortDirection, SparklineCell, SpecialValue, Stacking,
+        StackingMode, Stat, StatColorMode, StatGraphMode, Table, TableCell, TableCellType, Text,
+        TextMode, ThresholdMode, Thresholds, TimeRange, TimeSeriesToTable, Timeseries, Tooltip,
+        TooltipMode, TooltipSort, Transformation, Unit, ValueMapping, Variable, VariableBuilder,
+        VariableRefresh, VariableSelection, VariableSort, dashboard, loki, loki_query, prometheus,
+        promql,
     };
 }

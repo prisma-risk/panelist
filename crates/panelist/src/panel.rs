@@ -218,6 +218,7 @@ pub struct Panel {
     pub(crate) title: String,
     pub(crate) description: Option<String>,
     pub(crate) id: Option<u32>,
+    pub(crate) key: Option<String>,
     pub(crate) width: u16,
     pub(crate) height: u16,
     pub(crate) grid_pos: Option<GridPos>,
@@ -242,6 +243,7 @@ impl Panel {
             title: title.into(),
             description: None,
             id: None,
+            key: None,
             width,
             height,
             grid_pos: None,
@@ -549,6 +551,15 @@ impl<K: PanelType> PanelBuilder<K> {
     #[must_use]
     pub fn id(mut self, id: u32) -> Self {
         self.panel.id = Some(id);
+        self
+    }
+
+    /// Sets the identity [`crate::PanelIds::Stable`] derives this panel's ID from.
+    ///
+    /// Without a key, a stable ID comes from the row and panel titles, so renaming either one changes it. A key replaces both: the ID then survives renames and moves between rows. Keys must be unique across the dashboard. Positional IDs ignore keys, and an explicit [`id`](Self::id) takes precedence over one.
+    #[must_use]
+    pub fn key(mut self, key: impl Into<String>) -> Self {
+        self.panel.key = Some(key.into());
         self
     }
 
@@ -1013,6 +1024,15 @@ impl RawPanel {
     #[must_use]
     pub fn id(mut self, id: u32) -> Self {
         self.panel.id = Some(id);
+        self
+    }
+
+    /// Sets the identity [`crate::PanelIds::Stable`] derives this panel's ID from.
+    ///
+    /// Without a key, a stable ID comes from the row and panel titles, so renaming either one changes it. A key replaces both: the ID then survives renames and moves between rows. Keys must be unique across the dashboard. Positional IDs ignore keys, and an explicit [`id`](Self::id) takes precedence over one.
+    #[must_use]
+    pub fn key(mut self, key: impl Into<String>) -> Self {
+        self.panel.key = Some(key.into());
         self
     }
 
