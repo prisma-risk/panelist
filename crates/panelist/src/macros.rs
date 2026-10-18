@@ -83,9 +83,9 @@ macro_rules! loki {
 ///
 /// # Structure
 ///
-/// The body starts with `title: <expr>;`. Dashboard items follow: `uid`, `description`, `tags`, `refresh`, `time: [<from>, <to>]`, `timezone`, `editable`, `datasource`, `cursor_sync: off | crosshair | tooltip`, `schema_version`, `version`, `link`, `variable`, `row`, `panel`, `panels`, `extra "<key>": <json>`, and panels.
+/// The body starts with `title: <expr>;`. Dashboard items follow: `uid`, `description`, `tags`, `refresh`, `time: [<from>, <to>]`, `timezone`, `editable`, `datasource`, `cursor_sync: off | crosshair | tooltip`, `target: v11_5 | v13`, `schema_version`, `panel_ids: positional | stable`, `version`, `link`, `variable`, `row`, `panel`, `panels`, `extra "<key>": <json>`, and panels.
 ///
-/// A row is `row <title> { … }` and holds `collapsed`, `panel`, `panels`, and panels. A panel is `<kind> <title> { … }`, where the kind is `timeseries`, `stat`, `gauge`, `table`, `text`, `bar_gauge`, or `heatmap`.
+/// A row is `row <title> { … }` and holds `key`, `collapsed`, `panel`, `panels`, and panels. A panel is `<kind> <title> { … }`, where the kind is `timeseries`, `stat`, `gauge`, `table`, `text`, `bar_gauge`, or `heatmap`.
 ///
 /// Titles, variable names, link titles and URLs, mapping values, and the arguments of `rename`, `hide`, `order`, and `keep` are expressions. A title runs up to the `{` that opens its block, so wrap one that contains a block of its own in parentheses: `stat (if critical { "Errors!" } else { "Errors" }) { … }`.
 ///
@@ -119,7 +119,7 @@ macro_rules! loki {
 ///
 /// # Panel keys
 ///
-/// Every panel kind accepts `query`, `legend_format`, `description`, `width`, `height`, `id`, `grid: [<x>, <y>, <width>, <height>]`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds { … }`, `mapping`, `link`, `override`, `transform`, `option "<key>": <json>`, and `extra "<key>": <json>`. The rest apply to some kinds only:
+/// Every panel kind accepts `query`, `legend_format`, `description`, `width`, `height`, `id`, `key`, `grid: [<x>, <y>, <width>, <height>]`, `datasource`, `unit`, `min`, `max`, `decimals`, `display_name`, `transparent`, `color`, `thresholds { … }`, `mapping`, `link`, `override`, `transform`, `option "<key>": <json>`, and `extra "<key>": <json>`. The rest apply to some kinds only:
 ///
 /// | Kind | Keys |
 /// |---|---|

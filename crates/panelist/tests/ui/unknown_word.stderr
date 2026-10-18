@@ -5,37 +5,51 @@ error: unknown cursor sync `crosshar`; did you mean `crosshair`?
 29 |         cursor_sync: crosshar;
    |                      ^^^^^^^^
 
+error: unknown Grafana target `v12`; did you mean `v13`?
+       accepted: `v11_5`, `v13`; or any expression of type `GrafanaTarget`, such as `(v12)` for a variable
+  --> tests/ui/unknown_word.rs:30:17
+   |
+30 |         target: v12;
+   |                 ^^^
+
+error: unknown panel ID scheme `stabel`; did you mean `stable`?
+       accepted: `positional`, `stable`; or any expression of type `PanelIds`, such as `(stabel)` for a variable
+  --> tests/ui/unknown_word.rs:31:20
+   |
+31 |         panel_ids: stabel;
+   |                    ^^^^^^
+
 error: unknown unit `second`; did you mean `seconds`?
        accepted: `seconds`, `milliseconds`, `bytes`, `bytes_per_second`, `percent`, `percent_unit`, `reqps`, `ops`, `short`, `none`, `custom(<unit>)`; or any expression of type `Unit`, such as `(second)` for a variable
-  --> tests/ui/unknown_word.rs:31:19
+  --> tests/ui/unknown_word.rs:33:19
    |
-31 |             unit: second;
+33 |             unit: second;
    |                   ^^^^^^
 
 error: `scheme` is a heatmap color mode for `heatmap` panels, not for a `stat` panel
        accepted here: `value`, `background`, `none`
-  --> tests/ui/unknown_word.rs:32:25
+  --> tests/ui/unknown_word.rs:34:25
    |
-32 |             color_mode: scheme;
+34 |             color_mode: scheme;
    |                         ^^^^^^
 
 error: unknown color `gren`; did you mean `green`?
        accepted: `green`, `yellow`, `red`, `blue`, `orange`, `purple`, `"<any color>"`; or any expression of type `Color`, such as `(gren)` for a variable
-  --> tests/ui/unknown_word.rs:33:26
+  --> tests/ui/unknown_word.rs:35:26
    |
-33 |             color: fixed(gren);
+35 |             color: fixed(gren);
    |                          ^^^^
 
 error: unknown tooltip mode `mult`; did you mean `multi`?
        accepted: `single`, `multi`, `none`; or any expression of type `TooltipMode`, such as `(mult)` for a variable
-  --> tests/ui/unknown_word.rs:36:29
+  --> tests/ui/unknown_word.rs:38:29
    |
-36 |             tooltip { mode: mult; }
+38 |             tooltip { mode: mult; }
    |                             ^^^^
 
 error: unknown reducer `maximum`
        accepted: `last`, `min`, `max`, `mean`, `total`; or any expression of type `Reducer`, such as `(maximum)` for a variable
-  --> tests/ui/unknown_word.rs:37:37
+  --> tests/ui/unknown_word.rs:39:37
    |
-37 |             legend { values: [last, maximum]; }
+39 |             legend { values: [last, maximum]; }
    |                                     ^^^^^^^

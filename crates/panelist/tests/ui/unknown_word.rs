@@ -27,6 +27,8 @@ fn main() {
     let _ = dashboard! {
         title: "Words";
         cursor_sync: crosshar;
+        target: v12;
+        panel_ids: stabel;
         stat "Status" {
             unit: second;
             color_mode: scheme;

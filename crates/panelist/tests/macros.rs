@@ -1566,6 +1566,96 @@ fn newly_reachable_builder_options_match_the_builder_model() {
     );
 }
 
+/// Stable panel IDs and the Grafana target, each mapped to the builder
+/// method it names.
+#[test]
+fn panel_id_and_target_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Identity";
+        target: v11_5;
+        panel_ids: stable;
+
+        stat "Errors" { key: "errors"; }
+        row "Traffic" {
+            key: "traffic";
+            stat "Requests" {}
+            timeseries "Latency" { key: "latency"; }
+        }
+    };
+
+    let from_builder = Dashboard::new("Identity")
+        .target(GrafanaTarget::V11_5)
+        .panel_ids(PanelIds::Stable)
+        .panel(Stat::new("Errors").key("errors"))
+        .row(
+            Row::new("Traffic")
+                .key("traffic")
+                .panel(Stat::new("Requests"))
+                .panel(Timeseries::new("Latency").key("latency")),
+        );
+
+    assert_eq!(from_macro, from_builder);
+    assert_eq!(
+        from_macro.to_json_pretty().unwrap(),
+        from_builder.to_json_pretty().unwrap()
+    );
+}
+
+/// Pins what the keys change on the wire. The parity test above only shows
+/// the two surfaces agree, which stays true when both are wrong together.
+#[test]
+fn panel_id_and_target_dsl_emits_the_grafana_wire_values() {
+    let ids = |dashboard: Dashboard| -> Vec<u64> {
+        let json: serde_json::Value = serde_json::from_str(&dashboard.to_json().unwrap()).unwrap();
+        assert_eq!(json["schemaVersion"], json!(40));
+        json["panels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|panel| panel["id"].as_u64().unwrap())
+            .collect()
+    };
+
+    let before = ids(dashboard! {
+        title: "Identity";
+        target: v11_5;
+        panel_ids: stable;
+
+        row "Traffic" {
+            key: "traffic";
+            stat "Requests" { key: "requests"; }
+        }
+    });
+    // Renaming the keyed row and panel, and inserting a panel ahead of
+    // them, moves neither ID.
+    let after = ids(dashboard! {
+        title: "Identity";
+        target: v11_5;
+        panel_ids: stable;
+
+        stat "Errors" {}
+        row "Network traffic" {
+            key: "traffic";
+            stat "Request rate" { key: "requests"; }
+        }
+    });
+
+    assert!(before.iter().all(|id| (65_536..1 << 30).contains(id)));
+    assert_eq!(after[1..], before[..]);
+
+    let positional = dashboard! {
+        title: "Identity";
+        panel_ids: positional;
+        stat "Requests" { key: "requests"; }
+    };
+    let json: serde_json::Value = serde_json::from_str(&positional.to_json().unwrap()).unwrap();
+    assert_eq!(json["panels"][0]["id"], json!(1));
+    assert_eq!(
+        json["schemaVersion"],
+        json!(GrafanaTarget::V13.schema_version())
+    );
+}
+
 /// Compile-time check of the macro's key table: every key, on every panel
 /// kind the table says accepts it, must lower to a builder method that
 /// exists for that kind. A table entry that claims too much fails to
@@ -1610,6 +1700,7 @@ fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
                         width: 6;
                         height: 4;
                         id: next_id();
+                        key: stringify!($kind);
                         grid: [0, 0, 6, 4];
                         datasource: prometheus("main");
                         unit: custom("widgets");
@@ -1662,6 +1753,13 @@ fn every_key_lowers_to_a_builder_method_on_every_kind_that_accepts_it() {
 
     let specific = dashboard! {
         title: "Kind specific";
+        target: v11_5;
+        panel_ids: stable;
+
+        row "Row" {
+            key: "row";
+            collapsed: false;
+        }
 
         text "Text" {
             content: "c";
