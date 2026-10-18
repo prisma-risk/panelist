@@ -26,10 +26,54 @@ use std::{collections::BTreeMap, fs, path::Path};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 
-use crate::{DataSource, Error, Panel, Result, Variable, grafana, validation::ValidationErrors};
+use crate::{
+    DataSource, Error, GrafanaTarget, Panel, Result, Variable, grafana,
+    validation::ValidationErrors,
+};
 
-/// The default Classic dashboard schema emitted by Panelist.
-pub const DEFAULT_SCHEMA_VERSION: u32 = 41;
+/// How Panelist assigns numeric IDs to panels and rows that do not set one.
+///
+/// Grafana identifies a panel by its numeric `id` inside one dashboard. `viewPanel=` and `editPanel=` links, panel embeds, and links from alerts all name it, so an ID that moves breaks them. Explicit IDs set with `.id(N)` are always kept as written.
+///
+/// ```rust
+/// use panelist::{Dashboard, PanelIds, Row, Stat};
+///
+/// let dashboard = Dashboard::new("Service health")
+///     .panel_ids(PanelIds::Stable)
+///     .row(Row::new("Traffic").panel(Stat::new("Requests")));
+/// let json: serde_json::Value = serde_json::from_str(&dashboard.to_json()?)?;
+/// let id = json["panels"][1]["id"].as_u64().unwrap();
+///
+/// // Inserting a panel ahead of it does not move its ID.
+/// let dashboard = Dashboard::new("Service health")
+///     .panel_ids(PanelIds::Stable)
+///     .panel(Stat::new("Errors"))
+///     .row(Row::new("Traffic").panel(Stat::new("Requests")));
+/// let json: serde_json::Value = serde_json::from_str(&dashboard.to_json()?)?;
+/// assert_eq!(json["panels"][2]["id"].as_u64().unwrap(), id);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum PanelIds {
+    /// Numbers panels and rows `1, 2, 3, …` in dashboard order, skipping explicit IDs.
+    ///
+    /// This is the default and produces small, readable IDs. Inserting, removing, or reordering a panel renumbers every panel after it.
+    #[default]
+    Positional,
+    /// Derives each ID from the panel's identity, so it survives insertion, removal, and reordering.
+    ///
+    /// A panel's identity is its key if it has one (see [`PanelBuilder::key`](crate::PanelBuilder::key)), otherwise its row's identity plus its own title. A row's identity is its key (see [`Row::key`]), otherwise its title. Renaming an unkeyed panel or its row therefore changes the panel's ID; give it a key when links to it must outlive a rename, or when titles repeat.
+    ///
+    /// The derivation is fixed and part of Panelist's output contract:
+    ///
+    /// 1. Build a list of UTF-8 fields. A row is `["row", kind, value]`. A panel inside a row is `["panel", kind, value, title]`, where `kind` and `value` are the row's: `"key"` and its key, or `"title"` and its title. A panel outside any row is `["panel", title]`. A keyed panel is `["key", key]`, wherever it sits.
+    /// 2. Hash the fields with 64-bit FNV-1a, prefixing each field with its byte length as an 8-byte little-endian integer.
+    /// 3. The ID is `65536 + hash % (2^30 - 65536)`.
+    ///
+    /// IDs therefore fall in `65536..2^30`. Grafana's schema types a panel `id` as `uint32`, and Grafana numbers a panel added in its editor one above the highest existing ID; this range stays far below both `i32::MAX` and JavaScript's safe-integer limit, and above the small IDs authors pin by hand. Two panels that end up with the same ID, whether derived or explicit, are a [`ValidationError::PanelIdCollision`](crate::ValidationError::PanelIdCollision) naming both. Panelist never re-probes for a free ID, because the ID a panel gets would then depend on its neighbours.
+    Stable,
+}
 
 /// How panel cursors and tooltips are synchronized across a dashboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -144,6 +188,7 @@ impl DashboardLink {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub(crate) title: String,
+    pub(crate) key: Option<String>,
     pub(crate) collapsed: bool,
     pub(crate) panels: Vec<Panel>,
 }
@@ -154,9 +199,19 @@ impl Row {
     pub fn new(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
+            key: None,
             collapsed: false,
             panels: Vec::new(),
         }
+    }
+
+    /// Sets the identity [`PanelIds::Stable`] derives this row's ID, and its unkeyed panels' IDs, from.
+    ///
+    /// Without a key, a renamed row renumbers itself and every unkeyed panel in it. Keys must be unique among rows. Positional IDs ignore keys.
+    #[must_use]
+    pub fn key(mut self, key: impl Into<String>) -> Self {
+        self.key = Some(key.into());
+        self
     }
 
     /// Controls whether Grafana initially collapses this row.
@@ -194,7 +249,8 @@ pub enum DashboardItem {
 /// A strongly typed dashboard authoring model.
 ///
 /// Serialization performs validation, deterministic panel/query ID assignment,
-/// and 24-column layout before producing Grafana Classic dashboard JSON.
+/// and 24-column layout before producing Grafana Classic dashboard JSON for
+/// the dashboard's [`GrafanaTarget`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dashboard {
     pub(crate) title: String,
@@ -206,7 +262,9 @@ pub struct Dashboard {
     pub(crate) timezone: String,
     pub(crate) editable: bool,
     pub(crate) cursor_sync: DashboardCursorSync,
-    pub(crate) schema_version: u32,
+    pub(crate) target: GrafanaTarget,
+    pub(crate) schema_version: Option<u32>,
+    pub(crate) panel_ids: PanelIds,
     pub(crate) version: u32,
     pub(crate) datasource: Option<DataSource>,
     pub(crate) variables: Vec<Variable>,
@@ -229,7 +287,9 @@ impl Dashboard {
             timezone: "browser".to_owned(),
             editable: true,
             cursor_sync: DashboardCursorSync::Off,
-            schema_version: DEFAULT_SCHEMA_VERSION,
+            target: GrafanaTarget::default(),
+            schema_version: None,
+            panel_ids: PanelIds::default(),
             version: 0,
             datasource: None,
             variables: Vec::new(),
@@ -295,10 +355,30 @@ impl Dashboard {
         self
     }
 
-    /// Overrides the emitted Classic dashboard schema version.
+    /// Selects the Grafana release line the JSON is written for.
+    ///
+    /// The target picks the emitted `schemaVersion` and gates any wire difference between releases. It defaults to [`GrafanaTarget::V13`].
+    #[must_use]
+    pub fn target(mut self, target: GrafanaTarget) -> Self {
+        self.target = target;
+        self
+    }
+
+    /// Overrides the `schemaVersion` the [target](Self::target) would emit.
+    ///
+    /// This is an escape hatch for Grafana releases no target covers. It changes only the number: every other property is still shaped for the target. Grafana runs each migration newer than this number when it loads the dashboard, so claiming a version newer than the JSON really is skips migrations the JSON needed.
     #[must_use]
     pub fn schema_version(mut self, schema_version: u32) -> Self {
-        self.schema_version = schema_version;
+        self.schema_version = Some(schema_version);
+        self
+    }
+
+    /// Chooses how panels and rows without an explicit ID are numbered.
+    ///
+    /// Defaults to [`PanelIds::Positional`]. See [`PanelIds::Stable`] for IDs that survive inserting and reordering panels.
+    #[must_use]
+    pub fn panel_ids(mut self, panel_ids: PanelIds) -> Self {
+        self.panel_ids = panel_ids;
         self
     }
 
@@ -385,14 +465,27 @@ impl Dashboard {
         Ok(serde_json::to_string_pretty(self)?)
     }
 
-    /// Writes pretty deterministic JSON to `path`.
+    /// Writes pretty deterministic JSON with a trailing newline to `path`.
+    ///
+    /// To render a whole directory of dashboards, and check it in CI, use [`DashboardSet`](crate::DashboardSet).
     pub fn write_json(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        let json = self.to_json_pretty()?;
-        fs::write(path, format!("{json}\n")).map_err(|source| Error::Io {
+        fs::write(path, self.to_file_contents()?).map_err(|source| Error::Io {
             path: path.to_path_buf(),
             source,
         })
+    }
+
+    /// The exact bytes [`write_json`](Self::write_json) writes: validated pretty JSON and a trailing newline.
+    pub(crate) fn to_file_contents(&self) -> Result<String> {
+        let json = self.to_json_pretty()?;
+        Ok(format!("{json}\n"))
+    }
+
+    /// The `schemaVersion` this dashboard emits.
+    pub(crate) fn effective_schema_version(&self) -> u32 {
+        self.schema_version
+            .unwrap_or_else(|| self.target.schema_version())
     }
 }
 

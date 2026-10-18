@@ -413,7 +413,7 @@ Real-world provisioning metadata and visualization choices remain typed:
 use panelist::prelude::*;
 
 let dashboard = Dashboard::new("Operations")
-    .schema_version(39)
+    .target(GrafanaTarget::V11_5)
     .version(1)
     .cursor_sync(DashboardCursorSync::Crosshair)
     .variable(
@@ -452,6 +452,30 @@ let panel = Timeseries::new("Pinned")
 Expanded rows serialize their panels at the dashboard level, as Grafana Classic
 expects. Collapsed rows retain their panels inside the row object and only
 consume the one-unit row header while collapsed.
+
+### Panel IDs
+
+By default, panels and rows are numbered `1, 2, 3, …` in dashboard order, skipping any ID pinned with `.id(N)`. These positional IDs are small and readable, but inserting or reordering a panel renumbers everything after it. That breaks `viewPanel=` and `editPanel=` links and embeds, and makes every later panel show up in the JSON diff.
+
+`PanelIds::Stable` derives each ID from the panel's identity instead, so it survives insertion, removal, reordering, and collapsing a row:
+
+```rust
+use panelist::prelude::*;
+
+let dashboard = Dashboard::new("Checkout")
+    .panel_ids(PanelIds::Stable)
+    .row(
+        Row::new("HTTP")
+            .key("http")
+            .panel(Timeseries::new("Requests"))
+            .panel(Stat::new("Errors").key("errors")),
+    );
+# let _ = dashboard;
+```
+
+An unkeyed panel's identity is its row's identity plus its own title, and a row's identity is its title. So renaming an unkeyed panel, or the row it sits in, changes its ID. A `.key("…")` replaces the titles: a keyed row keeps its ID, and its unkeyed panels keep theirs, across a rename, and a keyed panel keeps its ID across a rename and a move to another row. Use keys where titles repeat or where links must outlive a rename.
+
+The hash is a fixed, documented FNV-1a, so IDs never change between Rust or Panelist releases, and they fall in `65536..2^30`, inside Grafana's `uint32` panel IDs and clear of small hand-pinned IDs. Two panels or rows that land on the same ID, including a derived ID equal to an explicit one, are a validation error naming both. Panelist never quietly picks another ID.
 
 ## Reusable components
 
@@ -501,10 +525,40 @@ dashboard.write_json("dashboard.json")?;
 # Ok::<(), panelist::Error>(())
 ```
 
-Validation reports duplicate explicit panel IDs and query refs, missing titles
-or expressions, invalid widths and positions, zero heights, and malformed
-threshold ordering. Invalid authored dashboards return errors instead of
-panicking.
+Validation reports duplicate explicit panel IDs and query refs, stable panel ID collisions, dashboard UIDs Grafana would refuse, missing titles or expressions, invalid widths and positions, zero heights, and malformed threshold ordering. Invalid authored dashboards return errors instead of panicking.
+
+## Rendering a directory
+
+Dashboards as code usually means committing the generated JSON, so reviewers see the wire diff and Grafana can provision the files. `DashboardSet` writes a set of dashboards into a directory and checks that directory in CI:
+
+```rust,no_run
+use std::process::ExitCode;
+
+use panelist::prelude::*;
+use panelist::DashboardSet;
+
+fn main() -> ExitCode {
+    let dashboards = DashboardSet::new()
+        .dashboard(Dashboard::new("Checkout").uid("checkout"))
+        .dashboard(Dashboard::new("Payments").uid("payments"));
+
+    let result = if std::env::args().any(|arg| arg == "--check") {
+        dashboards.check_dir("dashboards")
+    } else {
+        dashboards.write_dir("dashboards").map(drop)
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+```
+
+Each dashboard becomes `<uid>.json`: validated, pretty-printed JSON with a trailing newline. A dashboard without a UID, or two dashboards sharing one (ignoring case, for case-insensitive filesystems), is an error. `check_dir` never writes; it fails with a report listing every stale file, every missing file, and every orphaned `.json` file that no dashboard renders to anymore. `write_dir` removes the orphans, rewrites only files whose contents changed, and replaces each file atomically. Other files in the directory are left alone.
+
 
 It also catches query setups Grafana would run differently from how they read: a query on a mixed panel without a datasource of its own, and a Loki query that asks for a combined range-and-instant evaluation Loki cannot run.
 
@@ -529,11 +583,22 @@ Some `$` signs are not references and never trip the check. Variable `regex` opt
 
 ## Grafana compatibility
 
-Panelist emits Grafana Classic dashboard JSON with schema version 41. Classic
-remains importable and exportable in Grafana 13, works with file provisioning,
-and retains the numeric panel IDs and `gridPos` behavior that Panelist
-automates. Grafana's newer V2 resource model uses a different layout
-representation.
+Panelist emits Grafana Classic dashboard JSON. Classic remains importable and exportable in Grafana 13, works with file provisioning, and retains the numeric panel IDs and `gridPos` behavior that Panelist automates. Grafana's newer V2 resource model uses a different layout representation.
+
+A `GrafanaTarget` names the Grafana release line the JSON is written for. It sets `schemaVersion` to the version that release considers current, so Grafana runs no migration over the dashboard on load and its export matches the committed file:
+
+| Target | Verified against | `schemaVersion` |
+| --- | --- | --- |
+| `GrafanaTarget::V11_5` | Grafana 11.5.2 | 40 |
+| `GrafanaTarget::V13` (default) | Grafana 13.0.2 | 42 |
+
+```rust
+# use panelist::prelude::*;
+let dashboard = Dashboard::new("Checkout").target(GrafanaTarget::V11_5);
+# let _ = dashboard;
+```
+
+`make verify-grafana` round-trips every golden dashboard, rendered for each target, through that target's Grafana release and fails if Grafana drops or alters any property. For another release, pick the nearest older target and override the number with `.schema_version(N)`; that changes only the number.
 
 The authoring model, layout/normalization pass, and Grafana serialization model
 are separate modules so a future V2 serializer can preserve the DSL and
@@ -571,10 +636,8 @@ screenshots from that stack, so an image cannot drift from its example.
 
 ## Roadmap
 
-- Wire `scripts/verify-grafana.sh` (`make verify-grafana`) into CI so every
-  change is validated against a live Grafana 13 instance automatically; the
-  check itself already exists and round-trips both golden dashboards
-  cleanly today, it just isn't triggered on every push yet.
+- Wire `scripts/verify-grafana.sh` (`make verify-grafana`) into CI so every change is validated against a live Grafana for every target automatically. The check already round-trips every golden through Grafana 11.5.2 and 13.0.2 cleanly; it just isn't triggered on every push yet.
+- Add targets for the Grafana releases in between (11.6 through 12.1 use `schemaVersion` 41) once each has a verified golden round trip.
 - Add an opt-in Grafana V2 resource serializer and dynamic layouts.
 - Add annotations, range/regex value mappings, and data links; add more transformation types beyond the six modeled today (join, sort, organize, time-series-to-table, labels-to-fields, rename-by-regex).
 - Add more datasource query types without turning the core crate into an API
