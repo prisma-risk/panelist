@@ -404,6 +404,25 @@ fn lower(
             let value = value(tokens, name)?;
             called(method, repeat(cx, &value))
         }
+        Form::DataSource { mixed } => {
+            tokens.expect_colon(name)?;
+            let value = value(tokens, name)?;
+            match value.single_ident() {
+                Some(word) if word == "mixed" && *mixed => {
+                    let ty = cx.path("DataSource", word.span());
+                    let constructor = Ident::new("mixed", word.span());
+                    call("datasource", quote!(#ty::#constructor()))
+                }
+                Some(word) if word == "mixed" => {
+                    cx.error(syn::Error::new(
+                        word.span(),
+                        "`mixed` selects Grafana's mixed datasource, which only applies to a panel; give each query its own datasource instead",
+                    ));
+                    TokenStream::new()
+                }
+                _ => call("datasource", value.to_token_stream()),
+            }
+        }
         Form::Keyed(method) => {
             tokens.expect_colon(name)?;
             let value = value(tokens, name)?;

@@ -562,6 +562,8 @@ let panel = Timeseries::new("Requests and error logs")
 # let _ = panel;
 ```
 
+In the DSL, `datasource: mixed;` does the same on a panel.
+
 The typed API covers:
 
 - dashboards, rows, datasources, time ranges, links, and persisted variable

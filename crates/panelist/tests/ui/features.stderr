@@ -1,46 +1,52 @@
-error: expected `range(<from>, <to>)`
-  --> tests/ui/features.rs:31:21
+error: `mixed` selects Grafana's mixed datasource, which only applies to a panel; give each query its own datasource instead
+  --> tests/ui/features.rs:29:21
    |
-31 |             mapping range(0.0) => "Low";
+29 |         datasource: mixed;
+   |                     ^^^^^
+
+error: expected `range(<from>, <to>)`
+  --> tests/ui/features.rs:32:21
+   |
+32 |             mapping range(0.0) => "Low";
    |                     ^^^^^^^^^^
 
 error: unknown special value `nul`; did you mean `null`?
        accepted: `null`, `nan`, `null_or_nan`, `true`, `false`, `empty`; or any expression of type `SpecialValue`, such as `(nul)` for a variable
-  --> tests/ui/features.rs:32:29
+  --> tests/ui/features.rs:33:29
    |
-32 |             mapping special(nul) => "Missing";
+33 |             mapping special(nul) => "Missing";
    |                             ^^^
 
 error: expected `horizontal(<variable>)`, `horizontal(<variable>, <max per row>)`, or `vertical(<variable>)`
-  --> tests/ui/features.rs:33:21
+  --> tests/ui/features.rs:34:21
    |
-33 |             repeat: horizontal();
+34 |             repeat: horizontal();
    |                     ^^^^^^^^^^^^
 
 error: unknown continuous palette `blue_yelow_red`; did you mean `blue_yellow_red`?
        accepted: `green_yellow_red`, `red_yellow_green`, `blue_yellow_red`, `yellow_red`, `blue_purple`, `yellow_blue`, `blues`, `reds`, `greens`, `purples`, `viridis`, `magma`, `plasma`, `inferno`, `cividis`; or any expression of type `ContinuousPalette`, such as `(blue_yelow_red)` for a variable
-  --> tests/ui/features.rs:34:31
+  --> tests/ui/features.rs:35:31
    |
-34 |             color: continuous(blue_yelow_red);
+35 |             color: continuous(blue_yelow_red);
    |                               ^^^^^^^^^^^^^^
 
 error: unknown currency `euro`; did you mean `eur`?
        accepted: `usd`, `gbp`, `eur`, `jpy`, `rub`, `uah`, `brl`, `dkk`, `isk`, `nok`, `sek`, `czk`, `chf`, `pln`, `btc`, `milli_btc`, `micro_btc`, `zar`, `inr`, `krw`, `idr`, `php`, `vnd`, `try`, `myr`, `xpf`, `bgn`, `pyg`, `uyu`, `ils`; or any expression of type `Currency`, such as `(euro)` for a variable
-  --> tests/ui/features.rs:35:28
+  --> tests/ui/features.rs:36:28
    |
-35 |             unit: currency(euro);
+36 |             unit: currency(euro);
    |                            ^^^^
 
 error: unknown key `tooltip` in a data link block
        keys accepted here: `target_blank`, `include_vars`, `keep_time`
-  --> tests/ui/features.rs:36:46
+  --> tests/ui/features.rs:37:46
    |
-36 |             data_link "Logs" => "/explore" { tooltip: "Logs"; }
+37 |             data_link "Logs" => "/explore" { tooltip: "Logs"; }
    |                                              ^^^^^^^
 
 error: unknown key `icon` in an annotation block
        keys accepted here: `datasource`, `enable`, `hide`, `icon_color`, `step`, `title_format`, `text_format`, `tag_keys`, `use_value_for_time`
-  --> tests/ui/features.rs:39:13
+  --> tests/ui/features.rs:40:13
    |
-39 |             icon: red;
+40 |             icon: red;
    |             ^^^^

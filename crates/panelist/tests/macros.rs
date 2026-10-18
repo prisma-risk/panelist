@@ -2347,3 +2347,37 @@ fn query_field_config_and_new_words_match_the_builder_model() {
         from_builder.to_json_pretty().unwrap()
     );
 }
+
+/// `datasource: mixed;` on a panel selects Grafana's mixed datasource, and each query names its own.
+#[test]
+fn mixed_datasource_dsl_matches_the_builder_model() {
+    let from_macro = dashboard! {
+        title: "Mixed";
+
+        timeseries "Requests and errors" {
+            datasource: mixed;
+            query: promql!("sum(rate(http_requests_total[$__rate_interval]))") {
+                datasource: prometheus("prometheus-main");
+            }
+            query: loki!("sum(count_over_time({job=\"api\"} |= \"error\" [$__interval]))") {
+                datasource: loki("logs");
+            }
+        }
+    };
+
+    let from_builder = Dashboard::new("Mixed").panel(
+        Timeseries::new("Requests and errors")
+            .datasource(DataSource::mixed())
+            .query(
+                PrometheusQuery::new("sum(rate(http_requests_total[$__rate_interval]))")
+                    .datasource(prometheus("prometheus-main")),
+            )
+            .query(
+                LokiQuery::new("sum(count_over_time({job=\"api\"} |= \"error\" [$__interval]))")
+                    .datasource(loki("logs")),
+            ),
+    );
+
+    assert_eq!(from_macro, from_builder);
+    from_macro.validate().unwrap();
+}

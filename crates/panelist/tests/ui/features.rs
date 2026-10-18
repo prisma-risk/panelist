@@ -26,6 +26,7 @@ use panelist::prelude::*;
 fn main() {
     let _ = dashboard! {
         title: "Features";
+        datasource: mixed;
         variable "instance" { values: ["a"]; }
         stat "Mappings" {
             mapping range(0.0) => "Low";

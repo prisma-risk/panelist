@@ -165,7 +165,7 @@ macro_rules! loki {
 ///
 /// # Repeats, time overrides, mappings, links, and annotations
 ///
-/// `repeat: <variable>;` repeats a panel horizontally, and `repeat: horizontal(<variable>[, <max per row>]);` or `repeat: vertical(<variable>);` picks the direction. `min_interval`, `max_data_points`, `time_from`, `time_shift`, and `hide_time_override` set the panel's query options and relative time.
+/// `repeat: <variable>;` repeats a panel horizontally, and `repeat: horizontal(<variable>[, <max per row>]);` or `repeat: vertical(<variable>);` picks the direction. `min_interval`, `max_data_points`, `time_from`, `time_shift`, and `hide_time_override` set the panel's query options and relative time. `datasource: mixed;` on a panel selects Grafana's mixed datasource, so each query names its own.
 ///
 /// `mapping <value> => <text> [{ color: <color>; }]` maps one exact value. `mapping range(<from>, <to>) => …`, `mapping regex(<pattern>) => …`, and `mapping special(null | nan | null_or_nan | true | false | empty) => …` select the other mapping kinds.
 ///

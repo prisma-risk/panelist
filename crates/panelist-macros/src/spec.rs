@@ -479,6 +479,9 @@ pub(crate) enum Form {
     /// `key: <expr>;` calling `.method(<expr>)` on the keyed table that a
     /// `keyed_table` panel becomes, after every table key.
     Keyed(&'static str),
+    /// `datasource: <expr>;`. On a panel (`mixed` set) the word `mixed`
+    /// selects Grafana's mixed datasource; elsewhere it is rejected.
+    DataSource { mixed: bool },
     /// `override <matcher> { … }`, see [`MATCHERS`].
     Override,
     /// `transform …`, see [`TRANSFORMS`].
@@ -560,7 +563,7 @@ pub(crate) static DASHBOARD: Context = Context {
         key("time", ALL, Form::TimeRange("time")),
         expr("timezone", ALL),
         expr("editable", ALL),
-        expr("datasource", ALL),
+        key("datasource", ALL, Form::DataSource { mixed: false }),
         key("cursor_sync", ALL, Form::Enum("cursor_sync", &CURSOR_SYNC)),
         key("target", ALL, Form::Enum("target", &GRAFANA_TARGET)),
         expr("schema_version", ALL),
@@ -618,7 +621,7 @@ pub(crate) static PANEL: Context = Context {
         expr("id", ALL),
         expr("key", ALL),
         key("grid", ALL, Form::Grid("grid_pos")),
-        expr("datasource", ALL),
+        key("datasource", ALL, Form::DataSource { mixed: true }),
         key("unit", ALL, Form::Unit("unit")),
         expr("min", ALL),
         expr("max", ALL),
@@ -756,7 +759,7 @@ pub(crate) static QUERY: Context = Context {
         expr("legend_format", ALL),
         expr("ref_id", ALL),
         key("query_type", ALL, Form::Enum("query_type", &QUERY_TYPE)),
-        expr("datasource", ALL),
+        key("datasource", ALL, Form::DataSource { mixed: false }),
         expr("hidden", ALL),
         expr("interval", ALL),
         key(
@@ -785,7 +788,7 @@ pub(crate) static VARIABLE: Context = Context::new(
         expr("plugin", ALL),
         expr("label", ALL),
         expr("default", ALL),
-        expr("datasource", ALL),
+        key("datasource", ALL, Form::DataSource { mixed: false }),
         expr("multi", ALL),
         expr("include_all", ALL),
         expr("hidden", ALL),
@@ -840,7 +843,7 @@ pub(crate) static ANNOTATION: Context = Context::new(
     "annotation block",
     "__panelist_annotation",
     &[
-        expr("datasource", ALL),
+        key("datasource", ALL, Form::DataSource { mixed: false }),
         expr("enable", ALL),
         expr("hide", ALL),
         key("icon_color", ALL, Form::Color("icon_color")),
