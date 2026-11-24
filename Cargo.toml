@@ -8,8 +8,6 @@ edition = "2024"
 rust-version = "1.96"
 license = "Apache-2.0"
 repository = "https://github.com/prisma-risk/panelist"
-homepage = "https://github.com/prisma-risk/panelist"
-documentation = "https://docs.rs/panelist"
 authors = ["Sebastian Thiebaud <sebastian@prismarisk.com>"]
 description = "Concise, strongly typed Grafana dashboards as Rust code"
 readme = "README.md"
@@ -28,6 +26,9 @@ thiserror = "2"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
+
+[workspace.lints.cargo]
+unused_dependencies = "deny"
 
 [workspace.lints.clippy]
 await_holding_lock = "deny"
